@@ -198,6 +198,7 @@ class BybitStopOrderType(Enum):
     TAKE_PROFIT = "TakeProfit"
     STOP_LOSS = "StopLoss"
     TRAILING_STOP = "TrailingStop"
+    TRAILING_PROFIT = "TrailingProfit"
     STOP = "Stop"
     PARTIAL_TAKE_PROFIT = "PartialTakeProfit"
     PARTIAL_STOP_LOSS = "PartialStopLoss"
@@ -448,6 +449,108 @@ class BybitEnumParser:
                 BybitOrderSide.SELL,
                 BybitTriggerDirection.FALLS_TO,
             ): OrderType.TRAILING_STOP_LIMIT,
+            # TODO PR for orders
+            ################For closing BUY####################
+            # BybitClient MARKET StopLoss with PARTIAL for Closing BUY
+            (
+                BybitOrderType.MARKET,
+                BybitStopOrderType.PARTIAL_STOP_LOSS,
+                BybitOrderSide.SELL,
+                BybitTriggerDirection.FALLS_TO,
+            ): OrderType.STOP_MARKET,
+            # BybitClient MARKET StopLoss with FULL for Closing BUY
+            (
+                BybitOrderType.MARKET,
+                BybitStopOrderType.STOP_LOSS,
+                BybitOrderSide.SELL,
+                BybitTriggerDirection.FALLS_TO,
+            ): OrderType.STOP_MARKET,
+            #
+            # BybitClient MARKET TakeProfit with FULL for Closing BUY
+            (
+                BybitOrderType.MARKET,
+                BybitStopOrderType.TAKE_PROFIT,
+                BybitOrderSide.SELL,
+                BybitTriggerDirection.RISES_TO,
+            ): OrderType.MARKET_IF_TOUCHED,
+            # BybitClient MARKET TakeProfit with PARTIAL for Closing BUY
+            (
+                BybitOrderType.MARKET,
+                BybitStopOrderType.PARTIAL_TAKE_PROFIT,
+                BybitOrderSide.SELL,
+                BybitTriggerDirection.RISES_TO,
+            ): OrderType.MARKET_IF_TOUCHED,
+            #  BybitClient LIMIT TakeProfit with PARTIAL for Closing BUY
+            (
+                BybitOrderType.LIMIT,
+                BybitStopOrderType.PARTIAL_TAKE_PROFIT,
+                BybitOrderSide.SELL,
+                BybitTriggerDirection.RISES_TO,
+            ): OrderType.LIMIT_IF_TOUCHED,
+            # TrailingProfit MARKET for Closing BUY
+            (
+                BybitOrderType.MARKET,
+                BybitStopOrderType.TRAILING_PROFIT,
+                BybitOrderSide.SELL,
+                BybitTriggerDirection.FALLS_TO,
+            ): OrderType.MARKET_IF_TOUCHED,
+            # TrailingProfit LIMIT for Closing BUY
+            (
+                BybitOrderType.LIMIT,
+                BybitStopOrderType.TRAILING_PROFIT,
+                BybitOrderSide.SELL,
+                BybitTriggerDirection.FALLS_TO,
+            ): OrderType.LIMIT_IF_TOUCHED,
+            #### For closing SELL
+            # BybitClient MARKET StopLoss with PARTIAL for Closing SELL
+            (
+                BybitOrderType.MARKET,
+                BybitStopOrderType.PARTIAL_STOP_LOSS,
+                BybitOrderSide.BUY,
+                BybitTriggerDirection.RISES_TO,
+            ): OrderType.STOP_MARKET,
+            # BybitClient MARKET StopLoss with FULL for Closing SELL
+            (
+                BybitOrderType.MARKET,
+                BybitStopOrderType.STOP_LOSS,
+                BybitOrderSide.BUY,
+                BybitTriggerDirection.RISES_TO,
+            ): OrderType.STOP_MARKET,
+            # BybitClient MARKET TakeProfit with FULL for Closing SELL
+            (
+                BybitOrderType.MARKET,
+                BybitStopOrderType.TAKE_PROFIT,
+                BybitOrderSide.BUY,
+                BybitTriggerDirection.FALLS_TO,
+            ): OrderType.MARKET_IF_TOUCHED,
+            # BybitClient MARKET TakeProfit with PARTIAL for Closing SELL
+            (
+                BybitOrderType.MARKET,
+                BybitStopOrderType.PARTIAL_TAKE_PROFIT,
+                BybitOrderSide.BUY,
+                BybitTriggerDirection.FALLS_TO,
+            ): OrderType.MARKET_IF_TOUCHED,
+            # BybitClient LIMIT TakeProfit with PARTIAL for Closing SELL
+            (
+                BybitOrderType.LIMIT,
+                BybitStopOrderType.PARTIAL_TAKE_PROFIT,
+                BybitOrderSide.BUY,
+                BybitTriggerDirection.FALLS_TO,
+            ): OrderType.LIMIT_IF_TOUCHED,
+            # TrailingProfit MARKET for Closing SELL
+            (
+                BybitOrderType.MARKET,
+                BybitStopOrderType.TRAILING_PROFIT,
+                BybitOrderSide.BUY,
+                BybitTriggerDirection.RISES_TO,
+            ): OrderType.MARKET_IF_TOUCHED,
+            # TrailingProfit LIMIT for Closing SELL
+            (
+                BybitOrderType.LIMIT,
+                BybitStopOrderType.TRAILING_PROFIT,
+                BybitOrderSide.BUY,
+                BybitTriggerDirection.RISES_TO,
+            ): OrderType.LIMIT_IF_TOUCHED,
         }
 
         # TODO check time in force mapping
@@ -486,6 +589,7 @@ class BybitEnumParser:
             (OrderType.MARKET_IF_TOUCHED, BybitOrderStatus.REJECTED): OrderStatus.REJECTED,
             (OrderType.MARKET_IF_TOUCHED, BybitOrderStatus.CANCELED): OrderStatus.CANCELED,
             (OrderType.MARKET_IF_TOUCHED, BybitOrderStatus.UNTRIGGERED): OrderStatus.ACCEPTED,
+            (OrderType.MARKET_IF_TOUCHED, BybitOrderStatus.TRIGGERED): OrderStatus.TRIGGERED,
             (OrderType.MARKET_IF_TOUCHED, BybitOrderStatus.DEACTIVATED): OrderStatus.CANCELED,
             (OrderType.MARKET_IF_TOUCHED, BybitOrderStatus.PARTIALLY_FILLED): OrderStatus.PARTIALLY_FILLED,
             (OrderType.MARKET_IF_TOUCHED, BybitOrderStatus.PARTIALLY_FILLED_CANCELED): OrderStatus.CANCELED,
@@ -496,6 +600,7 @@ class BybitEnumParser:
             (OrderType.LIMIT_IF_TOUCHED, BybitOrderStatus.REJECTED): OrderStatus.REJECTED,
             (OrderType.LIMIT_IF_TOUCHED, BybitOrderStatus.CANCELED): OrderStatus.CANCELED,
             (OrderType.LIMIT_IF_TOUCHED, BybitOrderStatus.UNTRIGGERED): OrderStatus.ACCEPTED,
+            (OrderType.LIMIT_IF_TOUCHED, BybitOrderStatus.TRIGGERED): OrderStatus.TRIGGERED,
             (OrderType.LIMIT_IF_TOUCHED, BybitOrderStatus.DEACTIVATED): OrderStatus.CANCELED,
             (OrderType.LIMIT_IF_TOUCHED, BybitOrderStatus.PARTIALLY_FILLED): OrderStatus.PARTIALLY_FILLED,
             (OrderType.LIMIT_IF_TOUCHED, BybitOrderStatus.PARTIALLY_FILLED_CANCELED): OrderStatus.CANCELED,
