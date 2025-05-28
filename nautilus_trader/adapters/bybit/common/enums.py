@@ -28,7 +28,6 @@ from nautilus_trader.model.enums import TimeInForce
 from nautilus_trader.model.enums import TriggerType
 from nautilus_trader.model.enums import time_in_force_to_str
 
-
 if TYPE_CHECKING:
     from nautilus_trader.model.data import BarType
 
@@ -173,11 +172,13 @@ class BybitOrderStatus(Enum):
     DEACTIVATED = "Deactivated"
 
 
+
 @unique
 class BybitOrderSide(Enum):
     UNKNOWN = ""  # It will be an empty string in some cases
     BUY = "Buy"
     SELL = "Sell"
+
 
 
 @unique
@@ -551,6 +552,20 @@ class BybitEnumParser:
                 BybitOrderSide.BUY,
                 BybitTriggerDirection.RISES_TO,
             ): OrderType.LIMIT_IF_TOUCHED,
+            #     (<BybitOrderType.UNKNOWN: 'UNKNOWN'>, <BybitStopOrderType.NONE: ''>, <BybitOrderSide.BUY: 'Buy'>, <BybitTriggerDirection.NONE: 0>)
+            (
+                BybitOrderType.UNKNOWN,
+                BybitStopOrderType.NONE,
+                BybitOrderSide.BUY,
+                BybitTriggerDirection.NONE,
+            ): OrderType.MARKET,  # Used when execution type is Funding
+            (
+                BybitOrderType.UNKNOWN,
+                BybitStopOrderType.NONE,
+                BybitOrderSide.SELL,
+                BybitTriggerDirection.NONE,
+            ): OrderType.MARKET,  # Used when execution type is Funding
+
         }
 
         # TODO check time in force mapping
@@ -708,9 +723,9 @@ class BybitEnumParser:
         }
 
     def parse_bybit_order_status(
-        self,
-        order_type: OrderType,
-        order_status: BybitOrderStatus,
+            self,
+            order_type: OrderType,
+            order_status: BybitOrderStatus,
     ) -> OrderStatus:
         return check_dict_keys((order_type, order_status), self.bybit_to_nautilus_order_status)
 
@@ -724,11 +739,11 @@ class BybitEnumParser:
         return check_dict_keys(order_side, self.nautilus_to_bybit_order_side)
 
     def parse_bybit_order_type(
-        self,
-        order_type: BybitOrderType,
-        stop_order_type: BybitStopOrderType,
-        order_side: BybitOrderSide,
-        trigger_direction: BybitTriggerDirection,
+            self,
+            order_type: BybitOrderType,
+            stop_order_type: BybitStopOrderType,
+            order_side: BybitOrderSide,
+            trigger_direction: BybitTriggerDirection,
     ) -> OrderType:
         return check_dict_keys(
             (order_type, stop_order_type, order_side, trigger_direction),
@@ -750,9 +765,9 @@ class BybitEnumParser:
         return check_dict_keys(trigger_type, self.bybit_to_nautilus_trigger_type)
 
     def parse_trigger_direction(
-        self,
-        order_type: OrderType,
-        order_side: OrderSide,
+            self,
+            order_type: OrderType,
+            order_side: OrderSide,
     ) -> BybitTriggerDirection | None:
         return (
             self.trigger_direction_map_buy.get(order_type)
