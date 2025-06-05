@@ -1411,7 +1411,13 @@ class LiveExecutionEngine(ExecutionEngine):
             reconciliation=True,
         )
         self._log.debug(f"Generated {filled}")
-        self._handle_event(filled)
+        # self._handle_event(filled)
+        try:
+            self._handle_event(filled)
+        except Exception as e:
+            self._log.error(
+                f"Failed to handle event {filled}: {e}",
+            )
 
     def _should_update(self, order: Order, report: OrderStatusReport) -> bool:
         if report.quantity != order.quantity:
