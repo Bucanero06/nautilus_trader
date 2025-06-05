@@ -23,23 +23,30 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
+use std::{any::Any, cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
 
 use nautilus_common::{
+    actor::{
+        Actor, DataActor,
+        registry::{
+            dispose_component, register_component, reset_component, start_component, stop_component,
+        },
+    },
+    cache::Cache,
     clock::{Clock, TestClock},
     component::Component,
     enums::{ComponentState, ComponentTrigger, Environment},
     timer::TimeEvent,
 };
 use nautilus_core::{UUID4, UnixNanos};
-use nautilus_model::identifiers::{ComponentId, ExecAlgorithmId, StrategyId, TraderId};
+use nautilus_model::identifiers::{ActorId, ComponentId, ExecAlgorithmId, StrategyId, TraderId};
+use ustr::Ustr;
 
 /// Central orchestrator for managing trading components.
 ///
 /// The `Trader` manages the lifecycle and coordination of actors, strategies,
 /// and execution algorithms within the trading system. It provides component
 /// registration, state management, and integration with system engines.
-#[derive(Debug)]
 pub struct Trader {
     /// The unique trader identifier.
     pub trader_id: TraderId,
@@ -51,20 +58,28 @@ pub struct Trader {
     state: ComponentState,
     /// System clock for timestamping.
     clock: Rc<RefCell<dyn Clock>>,
-    /// Registered actors by component ID.
-    actors: HashMap<ComponentId, Box<dyn Component>>, // TODO: TBD
+    /// System cache for data storage.
+    cache: Rc<RefCell<Cache>>,
+    /// Registered actor IDs (actors stored in global registry).
+    actor_ids: Vec<ActorId>,
     /// Registered strategies by strategy ID.
     strategies: HashMap<StrategyId, Box<dyn Component>>,
     /// Registered execution algorithms by algorithm ID.
-    exec_algorithms: HashMap<ExecAlgorithmId, Box<dyn Component>>, // TODO: TBD
+    exec_algorithms: HashMap<ExecAlgorithmId, Box<dyn Component>>,
     /// Component clocks for individual components.
-    component_clocks: HashMap<ComponentId, Rc<RefCell<dyn Clock>>>, // TODO: TBD
+    clocks: HashMap<ComponentId, Rc<RefCell<dyn Clock>>>, // TODO: TBD global clock?
     /// Timestamp when the trader was created.
     ts_created: UnixNanos,
     /// Timestamp when the trader was last started.
     ts_started: Option<UnixNanos>,
     /// Timestamp when the trader was last stopped.
     ts_stopped: Option<UnixNanos>,
+}
+
+impl Debug for Trader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", stringify!(TraderId)) // TODO
+    }
 }
 
 impl Trader {
@@ -75,6 +90,7 @@ impl Trader {
         instance_id: UUID4,
         environment: Environment,
         clock: Rc<RefCell<dyn Clock>>,
+        cache: Rc<RefCell<Cache>>,
     ) -> Self {
         let ts_created = clock.borrow().timestamp_ns();
 
@@ -84,10 +100,11 @@ impl Trader {
             environment,
             state: ComponentState::PreInitialized,
             clock,
-            actors: HashMap::new(),
+            cache,
+            actor_ids: Vec::new(),
             strategies: HashMap::new(),
             exec_algorithms: HashMap::new(),
-            component_clocks: HashMap::new(),
+            clocks: HashMap::new(),
             ts_created,
             ts_started: None,
             ts_stopped: None,
@@ -157,7 +174,7 @@ impl Trader {
     /// Returns the number of registered actors.
     #[must_use]
     pub fn actor_count(&self) -> usize {
-        self.actors.len()
+        self.actor_ids.len()
     }
 
     /// Returns the number of registered strategies.
@@ -175,13 +192,13 @@ impl Trader {
     /// Returns the total number of registered components.
     #[must_use]
     pub fn component_count(&self) -> usize {
-        self.actors.len() + self.strategies.len() + self.exec_algorithms.len()
+        self.actor_ids.len() + self.strategies.len() + self.exec_algorithms.len()
     }
 
     /// Returns a list of all registered actor IDs.
     #[must_use]
-    pub fn actor_ids(&self) -> Vec<ComponentId> {
-        self.actors.keys().copied().collect()
+    pub fn actor_ids(&self) -> Vec<ActorId> {
+        self.actor_ids.clone()
     }
 
     /// Returns a list of all registered strategy IDs.
@@ -218,26 +235,35 @@ impl Trader {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The trader is not in a valid state for adding components
-    /// - An actor with the same ID is already registered
-    pub fn add_actor(&mut self, mut actor: Box<dyn Component>) -> anyhow::Result<()> {
+    /// - The trader is not in a valid state for adding components.
+    /// - An actor with the same ID is already registered.
+    pub fn add_actor<T>(&mut self, actor: T) -> anyhow::Result<()>
+    where
+        T: DataActor + Component + Debug + 'static,
+    {
         self.validate_component_registration()?;
 
-        let component_id = actor.id();
+        let actor_id = actor.actor_id();
 
         // Check for duplicate registration
-        if self.actors.contains_key(&component_id) {
-            anyhow::bail!("Actor '{component_id}' is already registered");
+        if self.actor_ids.contains(&actor_id) {
+            anyhow::bail!("Actor '{actor_id}' is already registered");
         }
 
-        let component_clock = self.create_component_clock();
-        self.component_clocks
-            .insert(component_id, component_clock.clone());
+        let clock = self.create_component_clock();
+        let component_id = ComponentId::new(actor_id.inner().as_str());
+        self.clocks.insert(component_id, clock.clone());
 
-        self.register_component(&mut actor, component_clock)?;
+        // Register actor with Component interface first
+        let mut actor_mut = actor;
+        actor_mut.register(self.trader_id, clock, self.cache.clone())?;
 
-        log::info!("Registered actor '{component_id}'");
-        self.actors.insert(component_id, actor);
+        // Register in global registry for message bus access (this consumes the actor)
+        register_component(actor_mut);
+
+        // Store actor ID for lifecycle management
+        self.actor_ids.push(actor_id);
+        log::info!("Registered '{actor_id}' with trader {}", self.trader_id);
 
         Ok(())
     }
@@ -259,17 +285,17 @@ impl Trader {
             anyhow::bail!("Strategy '{strategy_id}' is already registered");
         }
 
-        let component_clock = self.create_component_clock();
-        let component_id = strategy.id();
-        self.component_clocks
-            .insert(component_id, component_clock.clone());
+        let clock = self.create_component_clock();
+        let component_id = strategy.component_id();
+        self.clocks.insert(component_id, clock.clone());
 
-        self.register_component(&mut strategy, component_clock)?;
+        strategy.register(self.trader_id, clock, self.cache.clone())?;
 
-        // TODO: Generate unique order ID tag for strategy
-
-        log::info!("Registered strategy '{strategy_id}'");
         self.strategies.insert(strategy_id, strategy);
+        log::info!(
+            "Registered strategy '{strategy_id}' with trader {}",
+            self.trader_id
+        );
 
         Ok(())
     }
@@ -294,16 +320,18 @@ impl Trader {
             anyhow::bail!("Execution algorithm '{exec_algorithm_id}' is already registered");
         }
 
-        let component_clock = self.create_component_clock();
-        let component_id = exec_algorithm.id();
-        self.component_clocks
-            .insert(component_id, component_clock.clone());
+        let clock = self.create_component_clock();
+        let component_id = exec_algorithm.component_id();
+        self.clocks.insert(component_id, clock.clone());
 
-        self.register_component(&mut exec_algorithm, component_clock)?;
+        exec_algorithm.register(self.trader_id, clock, self.cache.clone())?;
 
-        log::info!("Registered execution algorithm '{exec_algorithm_id}'");
         self.exec_algorithms
             .insert(exec_algorithm_id, exec_algorithm);
+        log::info!(
+            "Registered execution algorithm '{exec_algorithm_id}' with trader {}",
+            self.trader_id
+        );
 
         Ok(())
     }
@@ -324,31 +352,6 @@ impl Trader {
         }
     }
 
-    /// Registers a component with system resources.
-    fn register_component(
-        &self,
-        component: &mut Box<dyn Component>,
-        _component_clock: Rc<RefCell<dyn Clock>>,
-    ) -> anyhow::Result<()> {
-        // Register component with system resources
-        // Note: In a full implementation, this would register the component
-        // with the message bus, cache, portfolio, and engines as needed.
-        // For now, we'll just set the component's basic properties.
-
-        log::debug!(
-            "Registering component '{}' with system resources",
-            component.id()
-        );
-
-        // TODO: Complete component registration with:
-        // - Message bus subscriptions
-        // - Cache integration
-        // - Portfolio registration
-        // - Engine registration based on component type
-
-        Ok(())
-    }
-
     /// Starts all registered components.
     ///
     /// # Errors
@@ -357,22 +360,20 @@ impl Trader {
     pub fn start_components(&mut self) -> anyhow::Result<()> {
         log::info!("Starting {} components", self.component_count());
 
-        // Start actors
-        for (id, actor) in &mut self.actors {
-            log::debug!("Starting actor '{id}'");
-            actor.start()?;
+        // Start actors (retrieved from global registry)
+        for actor_id in &self.actor_ids {
+            log::debug!("Starting actor '{actor_id}'");
+            start_component(&actor_id.inner())?;
         }
 
-        // Start strategies
         for (id, strategy) in &mut self.strategies {
             log::debug!("Starting strategy '{id}'");
-            strategy.start()?;
+            // strategy.start()?; // TODO: TBD
         }
 
-        // Start execution algorithms
         for (id, exec_algorithm) in &mut self.exec_algorithms {
             log::debug!("Starting execution algorithm '{id}'");
-            exec_algorithm.start()?;
+            // exec_algorithm.start()?;  // TODO: TBD
         }
 
         log::info!("All components started successfully");
@@ -387,22 +388,19 @@ impl Trader {
     pub fn stop_components(&mut self) -> anyhow::Result<()> {
         log::info!("Stopping {} components", self.component_count());
 
-        // Stop execution algorithms first
         for (id, exec_algorithm) in &mut self.exec_algorithms {
             log::debug!("Stopping execution algorithm '{id}'");
-            exec_algorithm.stop()?;
+            // exec_algorithm.stop()?;  // TODO: TBD
         }
 
-        // Stop strategies
         for (id, strategy) in &mut self.strategies {
             log::debug!("Stopping strategy '{id}'");
-            strategy.stop()?;
+            // strategy.stop()?;  // TODO: TBD
         }
 
-        // Stop actors last
-        for (id, actor) in &mut self.actors {
-            log::debug!("Stopping actor '{id}'");
-            actor.stop()?;
+        for actor_id in &self.actor_ids {
+            log::debug!("Stopping actor '{actor_id}'");
+            stop_component(&actor_id.inner())?;
         }
 
         log::info!("All components stopped successfully");
@@ -417,20 +415,20 @@ impl Trader {
     pub fn reset_components(&mut self) -> anyhow::Result<()> {
         log::info!("Resetting {} components", self.component_count());
 
-        // Reset all components
-        for (id, actor) in &mut self.actors {
-            log::debug!("Resetting actor '{id}'");
-            actor.reset()?;
+        // Reset actors (retrieved from global registry)
+        for actor_id in &self.actor_ids {
+            log::debug!("Resetting actor '{actor_id}'");
+            reset_component(&actor_id.inner())?;
         }
 
         for (id, strategy) in &mut self.strategies {
             log::debug!("Resetting strategy '{id}'");
-            strategy.reset()?;
+            // strategy.reset()?;  // TODO: TBD
         }
 
         for (id, exec_algorithm) in &mut self.exec_algorithms {
             log::debug!("Resetting execution algorithm '{id}'");
-            exec_algorithm.reset()?;
+            // exec_algorithm.reset()?;  // TODO: TBD
         }
 
         log::info!("All components reset successfully");
@@ -445,44 +443,72 @@ impl Trader {
     pub fn dispose_components(&mut self) -> anyhow::Result<()> {
         log::info!("Disposing {} components", self.component_count());
 
-        // Dispose all components
-        for (id, actor) in &mut self.actors {
-            log::debug!("Disposing actor '{id}'");
-            actor.dispose()?;
+        // Dispose actors (retrieved from global registry)
+        for actor_id in &self.actor_ids {
+            log::debug!("Disposing actor '{actor_id}'");
+            dispose_component(&actor_id.inner())?;
         }
 
         for (id, strategy) in &mut self.strategies {
             log::debug!("Disposing strategy '{id}'");
-            strategy.dispose()?;
+            // strategy.dispose()?;  // TODO: TBD
         }
 
         for (id, exec_algorithm) in &mut self.exec_algorithms {
             log::debug!("Disposing execution algorithm '{id}'");
-            exec_algorithm.dispose()?;
+            // exec_algorithm.dispose()?;  // TODO: TBD
         }
 
-        // Clear all collections
-        self.actors.clear();
+        self.actor_ids.clear();
         self.strategies.clear();
         self.exec_algorithms.clear();
-        self.component_clocks.clear();
+        self.clocks.clear();
 
         log::info!("All components disposed successfully");
         Ok(())
     }
+
+    /// Initializes the trader, transitioning from `PreInitialized` to `Ready` state.
+    ///
+    /// This method must be called before starting the trader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the trader cannot be initialized from its current state.
+    pub fn initialize(&mut self) -> anyhow::Result<()> {
+        log::info!("Initializing trader {}", self.trader_id);
+
+        let new_state = self.state.transition(&ComponentTrigger::Initialize)?;
+        self.state = new_state;
+
+        log::info!("Trader {} initialized successfully", self.trader_id);
+        Ok(())
+    }
+}
+
+impl Actor for Trader {
+    fn id(&self) -> ustr::Ustr {
+        // Convert TraderId to Ustr via string
+        let trader_id_str = format!("Trader-{}", self.trader_id);
+        Ustr::from(trader_id_str.as_str())
+    }
+
+    fn handle(&mut self, _msg: &dyn Any) {
+        // Trader doesn't handle messages directly
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 impl Component for Trader {
-    fn id(&self) -> ComponentId {
+    fn component_id(&self) -> ComponentId {
         ComponentId::from(format!("Trader-{}", self.trader_id).as_str())
     }
 
     fn state(&self) -> ComponentState {
         self.state
-    }
-
-    fn trigger(&self) -> ComponentTrigger {
-        ComponentTrigger::Initialize
     }
 
     fn is_running(&self) -> bool {
@@ -497,31 +523,32 @@ impl Component for Trader {
         self.is_disposed()
     }
 
+    fn register(
+        &mut self,
+        _trader_id: TraderId,
+        _clock: Rc<RefCell<dyn Clock>>,
+        _cache: Rc<RefCell<Cache>>,
+    ) -> anyhow::Result<()> {
+        // Trader doesn't need to register with itself
+        Ok(())
+    }
+
     fn start(&mut self) -> anyhow::Result<()> {
-        match self.state {
-            ComponentState::PreInitialized => {
-                anyhow::bail!(
-                    "Cannot start trader from PreInitialized state. Call initialize() first."
-                );
-            }
-            ComponentState::Running => {
-                log::warn!("Trader is already running");
-                return Ok(());
-            }
-            ComponentState::Disposed => {
-                anyhow::bail!("Cannot start disposed trader");
-            }
-            ComponentState::Ready | ComponentState::Stopped => {}
-            _ => {
-                anyhow::bail!("Cannot start trader in current state: {}", self.state);
-            }
+        if self.state == ComponentState::Running {
+            log::warn!("Trader is already running");
+            return Ok(());
+        }
+
+        // Validate that we can start from current state
+        if !matches!(self.state, ComponentState::Ready | ComponentState::Stopped) {
+            anyhow::bail!("Cannot start trader from {} state", self.state);
         }
 
         log::info!("Starting trader {}", self.trader_id);
 
-        // Start all components
         self.start_components()?;
 
+        // Transition to running state
         self.state = ComponentState::Running;
         self.ts_started = Some(self.clock.borrow().timestamp_ns());
 
@@ -593,23 +620,69 @@ impl Component for Trader {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, rc::Rc};
+    use std::{
+        cell::RefCell,
+        ops::{Deref, DerefMut},
+        rc::Rc,
+    };
 
     use nautilus_common::{
+        actor::{DataActorCore, data_actor::DataActorConfig},
         cache::Cache,
         clock::TestClock,
-        enums::{ComponentState, ComponentTrigger, Environment},
+        enums::{ComponentState, Environment},
         msgbus::MessageBus,
         timer::TimeEvent,
     };
     use nautilus_core::UUID4;
     use nautilus_data::engine::{DataEngine, config::DataEngineConfig};
     use nautilus_execution::engine::{ExecutionEngine, config::ExecutionEngineConfig};
-    use nautilus_model::identifiers::{ComponentId, TraderId};
+    use nautilus_model::identifiers::{ActorId, ComponentId, TraderId};
     use nautilus_portfolio::portfolio::Portfolio;
     use nautilus_risk::engine::{RiskEngine, config::RiskEngineConfig};
 
     use super::*;
+
+    // Simple DataActor wrapper for testing
+    #[derive(Debug)]
+    struct TestDataActor {
+        core: DataActorCore,
+    }
+
+    impl TestDataActor {
+        fn new(config: DataActorConfig) -> Self {
+            Self {
+                core: DataActorCore::new(config),
+            }
+        }
+    }
+
+    impl Deref for TestDataActor {
+        type Target = DataActorCore;
+        fn deref(&self) -> &Self::Target {
+            &self.core
+        }
+    }
+
+    impl DerefMut for TestDataActor {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.core
+        }
+    }
+
+    impl DataActor for TestDataActor {
+        fn actor_id(&self) -> ActorId {
+            self.core.actor_id()
+        }
+
+        fn core(&self) -> &DataActorCore {
+            &self.core
+        }
+
+        fn core_mut(&mut self) -> &mut DataActorCore {
+            &mut self.core
+        }
+    }
 
     // Mock component for testing
     #[derive(Debug)]
@@ -627,17 +700,27 @@ mod tests {
         }
     }
 
+    impl Actor for MockComponent {
+        fn id(&self) -> ustr::Ustr {
+            Ustr::from(self.id.to_string().as_str())
+        }
+
+        fn handle(&mut self, _msg: &dyn Any) {
+            // Mock implementation
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
     impl Component for MockComponent {
-        fn id(&self) -> ComponentId {
+        fn component_id(&self) -> ComponentId {
             self.id
         }
 
         fn state(&self) -> ComponentState {
             self.state
-        }
-
-        fn trigger(&self) -> ComponentTrigger {
-            ComponentTrigger::Initialize
         }
 
         fn is_running(&self) -> bool {
@@ -669,6 +752,16 @@ mod tests {
 
         fn dispose(&mut self) -> anyhow::Result<()> {
             self.state = ComponentState::Disposed;
+            Ok(())
+        }
+
+        fn register(
+            &mut self,
+            _trader_id: TraderId,
+            _clock: Rc<RefCell<dyn Clock>>,
+            _cache: Rc<RefCell<Cache>>,
+        ) -> anyhow::Result<()> {
+            // Mock implementation
             Ok(())
         }
 
@@ -747,7 +840,7 @@ mod tests {
         let trader_id = TraderId::default();
         let instance_id = UUID4::new();
 
-        let trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock);
+        let trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock, cache);
 
         assert_eq!(trader.trader_id(), trader_id);
         assert_eq!(trader.instance_id(), instance_id);
@@ -772,9 +865,12 @@ mod tests {
         let trader_id = TraderId::from("TRADER-001");
         let instance_id = UUID4::new();
 
-        let trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock);
+        let trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock, cache);
 
-        assert_eq!(trader.id(), ComponentId::from("Trader-TRADER-001"));
+        assert_eq!(
+            trader.component_id(),
+            ComponentId::from("Trader-TRADER-001")
+        );
     }
 
     #[test]
@@ -784,10 +880,10 @@ mod tests {
         let trader_id = TraderId::default();
         let instance_id = UUID4::new();
 
-        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock);
+        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock, cache);
 
-        let actor = Box::new(MockComponent::new("TestActor"));
-        let actor_id = actor.id();
+        let actor = TestDataActor::new(DataActorConfig::default());
+        let actor_id = actor.actor_id();
 
         let result = trader.add_actor(actor);
         assert!(result.is_ok());
@@ -803,10 +899,12 @@ mod tests {
         let trader_id = TraderId::default();
         let instance_id = UUID4::new();
 
-        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock);
+        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock, cache);
 
-        let actor1 = Box::new(MockComponent::new("TestActor"));
-        let actor2 = Box::new(MockComponent::new("TestActor"));
+        let mut config = DataActorConfig::default();
+        config.actor_id = Some(ActorId::from("TestActor"));
+        let actor1 = TestDataActor::new(config.clone());
+        let actor2 = TestDataActor::new(config);
 
         // First addition should succeed
         assert!(trader.add_actor(actor1).is_ok());
@@ -831,7 +929,7 @@ mod tests {
         let trader_id = TraderId::default();
         let instance_id = UUID4::new();
 
-        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock);
+        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock, cache);
 
         let strategy = Box::new(MockComponent::new("Test-Strategy"));
         let strategy_id = StrategyId::from(strategy.id().to_string().as_str());
@@ -850,7 +948,7 @@ mod tests {
         let trader_id = TraderId::default();
         let instance_id = UUID4::new();
 
-        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock);
+        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock, cache);
 
         let exec_algorithm = Box::new(MockComponent::new("TestExecAlgorithm"));
         let exec_algorithm_id = ExecAlgorithmId::from(exec_algorithm.id().to_string().as_str());
@@ -869,10 +967,10 @@ mod tests {
         let trader_id = TraderId::default();
         let instance_id = UUID4::new();
 
-        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock);
+        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock, cache);
 
         // Add components
-        let actor = Box::new(MockComponent::new("TestActor"));
+        let actor = TestDataActor::new(DataActorConfig::default());
         let strategy = Box::new(MockComponent::new("Test-Strategy"));
         let exec_algorithm = Box::new(MockComponent::new("TestExecAlgorithm"));
 
@@ -902,7 +1000,7 @@ mod tests {
         let trader_id = TraderId::default();
         let instance_id = UUID4::new();
 
-        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock);
+        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock, cache);
 
         // Initially pre-initialized
         assert_eq!(trader.state(), ComponentState::PreInitialized);
@@ -947,12 +1045,12 @@ mod tests {
         let trader_id = TraderId::default();
         let instance_id = UUID4::new();
 
-        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock);
+        let mut trader = Trader::new(trader_id, instance_id, Environment::Backtest, clock, cache);
 
         // Simulate running state
         trader.state = ComponentState::Running;
 
-        let actor = Box::new(MockComponent::new("TestActor"));
+        let actor = TestDataActor::new(DataActorConfig::default());
         let result = trader.add_actor(actor);
         assert!(result.is_err());
         assert!(
@@ -971,8 +1069,13 @@ mod tests {
         let instance_id = UUID4::new();
 
         // Test backtest environment - should create individual test clocks
-        let trader_backtest =
-            Trader::new(trader_id, instance_id, Environment::Backtest, clock.clone());
+        let trader_backtest = Trader::new(
+            trader_id,
+            instance_id,
+            Environment::Backtest,
+            clock.clone(),
+            cache.clone(),
+        );
 
         let backtest_clock = trader_backtest.create_component_clock();
         // In backtest, component clock should be different from system clock
@@ -982,7 +1085,13 @@ mod tests {
         );
 
         // Test live environment - should share system clock
-        let trader_live = Trader::new(trader_id, instance_id, Environment::Live, clock.clone());
+        let trader_live = Trader::new(
+            trader_id,
+            instance_id,
+            Environment::Live,
+            clock.clone(),
+            cache,
+        );
 
         let live_clock = trader_live.create_component_clock();
         // In live, component clock should be same as system clock

@@ -58,7 +58,16 @@ pub unsafe fn cstr_to_ustr(ptr: *const c_char) -> Ustr {
 ///
 /// # Safety
 ///
-/// Assumes `ptr` is a valid C string pointer.
+/// - Assumes `ptr` is a valid C string pointer.
+/// - The returned slice is only valid while the original C string remains allocated.
+/// - Caller must ensure the C string outlives any usage of the returned slice.
+///
+/// The actual lifetime is tied to the C string's allocation lifetime.
+/// This is acceptable because this function is only used for immediate
+/// consumption within FFI call boundaries where the C string remains valid.
+///
+/// This function is designed for immediate consumption within FFI calls.
+/// Do not store the returned slice for use beyond the current function scope.
 ///
 /// # Panics
 ///
@@ -88,15 +97,24 @@ pub unsafe fn optional_cstr_to_ustr(ptr: *const c_char) -> Option<Ustr> {
     }
 }
 
-/// Convert a C string pointer into a static string slice.
+/// Convert a C string pointer into a string slice.
 ///
 /// # Safety
 ///
-/// Assumes `ptr` is a valid C string pointer.
+/// - Assumes `ptr` is a valid C string pointer.
+/// - The returned slice is only valid while the original C string remains allocated.
+/// - Caller must ensure the C string outlives any usage of the returned slice.
+///
+/// The actual lifetime is tied to the C string's allocation lifetime.
+/// This is acceptable because this function is only used for immediate
+/// consumption within FFI call boundaries where the C string remains valid.
+///
+/// This function is designed for immediate consumption within FFI calls.
+/// Do not store the returned slice for use beyond the current function scope.
 ///
 /// # Panics
 ///
-/// Panics if `ptr` is null.
+/// Panics if `ptr` is null or contains invalid UTF-8.
 #[must_use]
 pub unsafe fn cstr_as_str(ptr: *const c_char) -> &'static str {
     assert!(!ptr.is_null(), "`ptr` was NULL");
@@ -104,11 +122,24 @@ pub unsafe fn cstr_as_str(ptr: *const c_char) -> &'static str {
     cstr.to_str().expect("CStr::from_ptr failed")
 }
 
-/// Convert a C string pointer into an owned `Option<String>`.
+/// Convert a C string pointer into an `Option<&str>`.
 ///
 /// # Safety
 ///
-/// Assumes `ptr` is a valid C string pointer or NULL.
+/// - Assumes `ptr` is a valid C string pointer or NULL.
+/// - The returned slice is only valid while the original C string remains allocated.
+/// - Caller must ensure the C string outlives any usage of the returned slice.
+///
+/// The actual lifetime is tied to the C string's allocation lifetime.
+/// This is acceptable because this function is only used for immediate
+/// consumption within FFI call boundaries where the C string remains valid.
+///
+/// This function is designed for immediate consumption within FFI calls.
+/// Do not store the returned slice for use beyond the current function scope.
+///
+/// # Panics
+///
+/// Panics if `ptr` is not null but contains invalid UTF-8.
 #[must_use]
 pub unsafe fn optional_cstr_to_str(ptr: *const c_char) -> Option<&'static str> {
     if ptr.is_null() {

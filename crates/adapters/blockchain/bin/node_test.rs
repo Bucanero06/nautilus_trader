@@ -26,10 +26,15 @@ use nautilus_model::{
     defi::chain::{Blockchain, Chain, chains},
     identifiers::TraderId,
 };
-use tokio::time::Duration;
+
+// Run with `cargo run -p nautilus-blockchain --bin node_test --features hypersync,python`
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // TODO: Initialize Python interpreter only if python feature is enabled
+    // #[cfg(feature = "python")]
+    pyo3::prepare_freethreaded_python();
+
     dotenvy::dotenv().ok();
 
     let environment = Environment::Live;
@@ -67,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         false, // Don't cache locally for this test
     );
 
-    let client_factory = Box::new(BlockchainDataClientFactory::new());
+    let client_factory = BlockchainDataClientFactory::new();
     let client_config = BlockchainClientConfig::new(blockchain_config, chain.clone());
 
     let mut node = LiveNode::builder(node_name, trader_id, environment)?
@@ -76,23 +81,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_data_client(
             None, // Use factory name
             client_factory,
-            Box::new(client_config),
+            client_config,
         )?
         .build()?;
 
-    node.start().await?;
-
-    // Let it run briefly to ensure all components are properly initialized
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    node.stop().await?;
+    node.run().await?;
 
     Ok(())
-}
-
-#[cfg(not(feature = "hypersync"))]
-fn main() {
-    println!("⚠️  kernel_test binary requires the 'hypersync' feature to be enabled.");
-    println!("   Run with: cargo run --bin kernel_test --features hypersync");
-    std::process::exit(1);
 }

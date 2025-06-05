@@ -40,10 +40,22 @@
 pub mod common;
 pub mod decode;
 pub mod enums;
-pub mod live;
+pub mod historical;
 pub mod loader;
 pub mod symbology;
 pub mod types;
 
 #[cfg(feature = "python")]
 pub mod python;
+
+#[cfg(feature = "live")]
+pub mod data;
+
+#[cfg(feature = "live")]
+pub mod factories;
+
+#[cfg(feature = "live")]
+pub mod live;
+
+#[cfg(feature = "live")]
+pub mod actor;

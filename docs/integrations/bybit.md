@@ -85,30 +85,69 @@ for the instrument ID. For example:
 - The BTCUSDT perpetual futures contract is identified with `-LINEAR`, such as `BTCUSDT-LINEAR`.
 - The BTCUSD inverse perpetual futures contract is identified with `-INVERSE`, such as `BTCUSD-INVERSE`.
 
-## Order types
+## Capability Matrix
 
 Bybit offers a flexible combination of trigger types, enabling a broader range of Nautilus orders.
 All the order types listed below can be used as *either* entries or exits, except for trailing stops
 (which utilize a position-related API).
 
-|                        | Spot                 | Derivatives (Linear, Inverse, Options)  |
-|------------------------|----------------------|-----------------------------------------|
-| `MARKET`               | ✓                    | ✓                                       |
-| `LIMIT`                | ✓                    | ✓                                       |
-| `STOP_MARKET`          | ✓                    | ✓                                       |
-| `STOP_LIMIT`           | ✓                    | ✓                                       |
-| `MARKET_IF_TOUCHED`    | ✓                    | ✓                                       |
-| `LIMIT_IF_TOUCHED`     | ✓                    | ✓                                       |
-| `TRAILING_STOP_MARKET` | Not supported        | ✓                                       |
+### Order Types
 
-### Limitations for SPOT
+| Order Type             | Spot | Linear | Inverse | Notes                    |
+|------------------------|------|--------|---------|--------------------------|
+| `MARKET`               | ✓    | ✓      | ✓       |                          |
+| `LIMIT`                | ✓    | ✓      | ✓       |                          |
+| `STOP_MARKET`          | ✓    | ✓      | ✓       |                          |
+| `STOP_LIMIT`           | ✓    | ✓      | ✓       |                          |
+| `MARKET_IF_TOUCHED`    | ✓    | ✓      | ✓       |                          |
+| `LIMIT_IF_TOUCHED`     | ✓    | ✓      | ✓       |                          |
+| `TRAILING_STOP_MARKET` | -    | ✓      | ✓       | Not supported for Spot.  |
+
+### Execution Instructions
+
+| Instruction   | Spot | Linear | Inverse | Notes                             |
+|---------------|------|--------|---------|-----------------------------------|
+| `post_only`   | ✓    | ✓      | ✓       | Only supported on `LIMIT` orders. |
+| `reduce_only` | -    | ✓      | ✓       | Not supported for Spot products.  |
+
+### Time-in-Force Options
+
+| Time-in-Force | Spot | Linear | Inverse | Notes                        |
+|---------------|------|--------|---------|------------------------------|
+| `GTC`         | ✓    | ✓      | ✓       | Good Till Canceled.          |
+| `GTD`         | -    | -      | -       | *Not supported*.             |
+| `FOK`         | ✓    | ✓      | ✓       | Fill or Kill.                |
+| `IOC`         | ✓    | ✓      | ✓       | Immediate or Cancel.         |
+
+### Advanced Order Features
+
+| Feature            | Spot | Linear | Inverse | Notes                                  |
+|--------------------|------|--------|---------|----------------------------------------|
+| Order Modification | ✓    | ✓      | ✓       | Price and quantity modification.       |
+| Bracket/OCO Orders | ✓    | ✓      | ✓       | UI only; API users implement manually. |
+| Iceberg Orders     | ✓    | ✓      | ✓       | Max 10 per account, 1 per symbol.      |
+
+### Configuration Options
+
+The following execution client configuration options affect order behavior:
+
+| Option                       | Default | Description                                          |
+|------------------------------|---------|------------------------------------------------------|
+| `use_gtd`                    | `False` | GTD is not supported; orders are remapped to GTC for local management. |
+| `use_ws_trade_api`           | `False` | If `True`, uses WebSocket for order requests instead of HTTP. |
+| `use_http_batch_api`         | `False` | If `True`, uses HTTP batch API when WebSocket trading is enabled. |
+| `futures_leverages`          | `None`  | Dict to set leverage for futures symbols. |
+| `position_mode`              | `None`  | Dict to set position mode for USDT perpetual and inverse futures. |
+| `margin_mode`                | `None`  | Sets margin mode for the account. |
+
+### Product-Specific Limitations
 
 The following limitations apply to SPOT products, as positions are not tracked on the venue side:
 
-- `reduce_only` orders are not supported
-- Trailing stop orders are not supported
+- `reduce_only` orders are *not supported*.
+- Trailing stop orders are *not supported*.
 
-### Trailing stops
+### Trailing Stops
 
 Trailing stops on Bybit do not have a client order ID on the venue side (though there is a `venue_order_id`).
 This is because trailing stops are associated with a netted position for an instrument.
@@ -123,11 +162,11 @@ Consider the following points when using trailing stops on Bybit:
 
 The product types for each client must be specified in the configurations.
 
-### Data clients
+### Data Clients
 
 If no product types are specified then all product types will be loaded and available.
 
-### Execution clients
+### Execution Clients
 
 Because Nautilus does not support a "unified" account, the account type must be either cash **or** margin.
 This means there is a limitation that you cannot specify SPOT with any of the other derivative product types.
@@ -186,7 +225,7 @@ node.add_exec_client_factory(BYBIT, BybitLiveExecClientFactory)
 node.build()
 ```
 
-### API credentials
+### API Credentials
 
 There are two options for supplying your credentials to the Bybit clients.
 Either pass the corresponding `api_key` and `api_secret` values to the configuration objects, or

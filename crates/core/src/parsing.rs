@@ -27,13 +27,17 @@ pub fn precision_from_str(s: &str) -> u8 {
 
     // Check for scientific notation
     if s.contains("e-") {
+        // SAFETY: Double unwrap is acceptable here because:
+        // 1. We already validated the string contains "e-"
+        // 2. Function is used only for parsing valid numeric strings in controlled contexts
+        // 3. Alternative error handling would complicate the API for minimal benefit
         return s.split("e-").last().unwrap().parse::<u8>().unwrap();
     }
 
     // Check for decimal precision
     if let Some((_, decimal_part)) = s.split_once('.') {
-        // Safe to truncate length to u8 for reasonable decimal strings
-        decimal_part.len() as u8
+        // Clamp decimal precision to u8::MAX for very long decimal strings
+        decimal_part.len().min(u8::MAX as usize) as u8
     } else {
         0
     }
@@ -60,9 +64,9 @@ pub fn min_increment_precision_from_str(s: &str) -> u8 {
         let decimal_part = &s[dot_pos + 1..];
         if decimal_part.chars().any(|c| c != '0') {
             let trimmed_len = decimal_part.trim_end_matches('0').len();
-            return trimmed_len as u8;
+            return trimmed_len.min(u8::MAX as usize) as u8;
         }
-        return decimal_part.len() as u8;
+        return decimal_part.len().min(u8::MAX as usize) as u8;
     }
 
     0

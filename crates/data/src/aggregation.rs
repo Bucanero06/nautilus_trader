@@ -860,11 +860,10 @@ where
     timer_name: String,
     interval_ns: UnixNanos,
     next_close_ns: UnixNanos,
-    composite_bar_build_delay: i64,
-    add_delay: bool,
+    bar_build_delay: u64,
     batch_open_ns: UnixNanos,
     batch_next_close_ns: UnixNanos,
-    time_bars_origin: Option<TimeDelta>,
+    time_bars_origin_offset: Option<TimeDelta>,
     skip_first_non_full_bar: bool,
 }
 
@@ -877,7 +876,7 @@ impl<H: FnMut(Bar)> Debug for TimeBarAggregator<H> {
             .field("is_left_open", &self.is_left_open)
             .field("timer_name", &self.timer_name)
             .field("interval_ns", &self.interval_ns)
-            .field("composite_bar_build_delay", &self.composite_bar_build_delay)
+            .field("bar_build_delay", &self.bar_build_delay)
             .field("skip_first_non_full_bar", &self.skip_first_non_full_bar)
             .finish()
     }
@@ -926,17 +925,14 @@ where
         build_with_no_updates: bool,
         timestamp_on_close: bool,
         interval_type: BarIntervalType,
-        time_bars_origin: Option<TimeDelta>,
-        composite_bar_build_delay: i64,
+        time_bars_origin_offset: Option<TimeDelta>,
+        bar_build_delay: u64,
         skip_first_non_full_bar: bool,
     ) -> Self {
         let is_left_open = match interval_type {
             BarIntervalType::LeftOpen => true,
             BarIntervalType::RightOpen => false,
         };
-
-        let add_delay = bar_type.is_composite()
-            && bar_type.composite().aggregation_source() == AggregationSource::Internal;
 
         let core = BarAggregatorCore::new(
             bar_type.standard(),
@@ -958,11 +954,10 @@ where
             timer_name: bar_type.to_string(),
             interval_ns: get_bar_interval_ns(&bar_type),
             next_close_ns: UnixNanos::default(),
-            composite_bar_build_delay,
-            add_delay,
+            bar_build_delay,
             batch_open_ns: UnixNanos::default(),
             batch_next_close_ns: UnixNanos::default(),
-            time_bars_origin,
+            time_bars_origin_offset,
             skip_first_non_full_bar,
         }
     }
@@ -978,22 +973,21 @@ where
     /// Panics if the underlying clock timer registration fails.
     pub fn start(&mut self, callback: NewBarCallback<H>) -> anyhow::Result<()> {
         let now = self.clock.borrow().utc_now();
-        let mut start_time = get_time_bar_start(now, &self.bar_type(), self.time_bars_origin);
+        let mut start_time =
+            get_time_bar_start(now, &self.bar_type(), self.time_bars_origin_offset);
 
         if start_time == now {
             self.skip_first_non_full_bar = false;
         }
 
-        if self.add_delay {
-            start_time += TimeDelta::microseconds(self.composite_bar_build_delay);
-        }
+        start_time += TimeDelta::microseconds(self.bar_build_delay as i64);
 
         let spec = &self.bar_type().spec();
         let start_time_ns = UnixNanos::from(start_time);
 
         if spec.aggregation == BarAggregation::Month {
             let step = spec.step.get() as u32;
-            let alert_time_ns = add_n_months_nanos(start_time_ns, step);
+            let alert_time_ns = add_n_months_nanos(start_time_ns, step).expect(FAILED);
 
             self.clock
                 .borrow_mut()
@@ -1022,22 +1016,28 @@ where
         self.clock.borrow_mut().cancel_timer(&self.timer_name);
     }
 
+    /// Starts batch time for bar aggregation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if month arithmetic operations fail for monthly aggregation intervals.
     pub fn start_batch_time(&mut self, time_ns: UnixNanos) {
         let spec = self.bar_type().spec();
         self.core.batch_mode = true;
 
         let time = time_ns.to_datetime_utc();
-        let start_time = get_time_bar_start(time, &self.bar_type(), self.time_bars_origin);
+        let start_time = get_time_bar_start(time, &self.bar_type(), self.time_bars_origin_offset);
         self.batch_open_ns = UnixNanos::from(start_time);
 
         if spec.aggregation == BarAggregation::Month {
             let step = spec.step.get() as u32;
 
             if self.batch_open_ns == time_ns {
-                self.batch_open_ns = subtract_n_months_nanos(self.batch_open_ns, step);
+                self.batch_open_ns =
+                    subtract_n_months_nanos(self.batch_open_ns, step).expect(FAILED);
             }
 
-            self.batch_next_close_ns = add_n_months_nanos(self.batch_open_ns, step);
+            self.batch_next_close_ns = add_n_months_nanos(self.batch_open_ns, step).expect(FAILED);
         } else {
             if self.batch_open_ns == time_ns {
                 self.batch_open_ns -= self.interval_ns;
@@ -1092,10 +1092,12 @@ where
             // Ensure batch times are coherent with last builder update
             if self.bar_type().spec().aggregation == BarAggregation::Month {
                 while self.batch_next_close_ns < time_ns {
-                    self.batch_next_close_ns = add_n_months_nanos(self.batch_next_close_ns, step);
+                    self.batch_next_close_ns =
+                        add_n_months_nanos(self.batch_next_close_ns, step).expect(FAILED);
                 }
 
-                self.batch_open_ns = subtract_n_months_nanos(self.batch_next_close_ns, step);
+                self.batch_open_ns =
+                    subtract_n_months_nanos(self.batch_next_close_ns, step).expect(FAILED);
             } else {
                 while self.batch_next_close_ns < time_ns {
                     self.batch_next_close_ns += self.interval_ns;
@@ -1111,7 +1113,8 @@ where
             self.batch_open_ns = self.batch_next_close_ns;
 
             if self.bar_type().spec().aggregation == BarAggregation::Month {
-                self.batch_next_close_ns = add_n_months_nanos(self.batch_next_close_ns, step);
+                self.batch_next_close_ns =
+                    add_n_months_nanos(self.batch_next_close_ns, step).expect(FAILED);
             } else {
                 self.batch_next_close_ns += self.interval_ns;
             }
@@ -1142,7 +1145,7 @@ where
 
         if self.bar_type().spec().aggregation == BarAggregation::Month {
             let step = self.bar_type().spec().step.get() as u32;
-            let next_alert_ns = add_n_months_nanos(ts_init, step);
+            let next_alert_ns = add_n_months_nanos(ts_init, step).expect(FAILED);
 
             self.clock
                 .borrow_mut()
@@ -1937,8 +1940,8 @@ mod tests {
             true,  // build_with_no_updates
             false, // timestamp_on_close
             BarIntervalType::LeftOpen,
-            None,  // time_bars_origin
-            15,    // composite_bar_build_delay
+            None,  // time_bars_origin_offset
+            15,    // bar_build_delay
             false, // skip_first_non_full_bar
         );
 

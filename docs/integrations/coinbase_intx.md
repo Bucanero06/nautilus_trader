@@ -103,7 +103,7 @@ The WebSocket client handles automatic reconnection and re-subscribes to active 
 
 **The adapter is designed to trade one Coinbase International portfolio per execution client.**
 
-### Selecting a portfolio
+### Selecting a Portfolio
 
 To identify your available portfolios and their IDs, use the REST client by running the following script:
 
@@ -128,37 +128,62 @@ This will output a list of portfolio details, similar to the example below:
   'user_uuid': 'd4fbf7ea-9515-1068-8d60-4de91702c108'}]
 ```
 
-### Configuring the portfolio
+### Configuring the Portfolio
 
 To specify a portfolio for trading, set the `COINBASE_INTX_PORTFOLIO_ID` environment variable to
 the desired `portfolio_id`. If you're using multiple execution clients, you can alternatively define
 the `portfolio_id` in the execution configuration for each client.
 
-### Order types
+## Capability Matrix
 
 Coinbase International offers market, limit, and stop order types, enabling a broad range of strategies.
-The table below indicates which order types are supported (✓).
 
-|                        | Derivatives          | Spot                     |
-|------------------------|----------------------|--------------------------|
-| `MARKET`               | ✓                    | ✓                        |
-| `LIMIT`                | ✓                    | ✓                        |
-| `STOP_MARKET`          | ✓                    | ✓                        |
-| `STOP_LIMIT`           | ✓                    | ✓                        |
+### Order Types
 
-:::note
-`MARKET` orders must be submitted with either `IOC` or `FOK` time in force.
-:::
+| Order Type             | Derivatives | Spot | Notes                                   |
+|------------------------|-------------|------|-----------------------------------------|
+| `MARKET`               | ✓           | ✓    | Must use `IOC` or `FOK` time-in-forc    |
+| `LIMIT`                | ✓           | ✓    |                                         |
+| `STOP_MARKET`          | ✓           | ✓    |                                         |
+| `STOP_LIMIT`           | ✓           | ✓    |                                         |
+| `MARKET_IF_TOUCHED`    | -           | -    | *Not supported*.                        |
+| `LIMIT_IF_TOUCHED`     | -           | -    | *Not supported*.                        |
+| `TRAILING_STOP_MARKET` | -           | -    | *Not supported*.                        |
 
-### Advanced order features
+### Execution Instructions
 
-Coinbase International supports several advanced order features that can be accessed through the adapter:
+| Instruction   | Derivatives | Spot | Notes                                            |
+|---------------|-------------|------|--------------------------------------------------|
+| `post_only`   | ✓           | ✓    | Ensures orders only provide liquidity.           |
+| `reduce_only` | ✓           | ✓    | Ensures orders only reduce existing positions.   |
 
-- **Post-Only**: Limit orders can be specified as post-only (`post_only=True`) to ensure they only provide liquidity and never take liquidity.
-- **Reduce-Only**: Orders can be specified as reduce-only (`reduce_only=True`) to ensure they only reduce existing positions and never increase exposure.
-- **Time-In-Force**: All standard time-in-force options are supported (GTC, GTD, IOC, FOK).
+### Time-in-Force Options
 
-### FIX Drop Copy integration
+| Time-in-Force | Derivatives | Spot | Notes                                            |
+|---------------|-------------|------|--------------------------------------------------|
+| `GTC`         | ✓           | ✓    | Good Till Canceled.                              |
+| `GTD`         | ✓           | ✓    | Good Till Date.                                  |
+| `FOK`         | ✓           | ✓    | Fill or Kill.                                    |
+| `IOC`         | ✓           | ✓    | Immediate or Cancel.                             |
+
+### Advanced Order Features
+
+| Feature            | Derivatives | Spot | Notes                                       |
+|--------------------|-------------|------|---------------------------------------------|
+| Order Modification | ✓           | ✓    | Price and quantity modification.             |
+| Bracket/OCO Orders | ?           | ?    | Requires further investigation.              |
+| Iceberg Orders     | ✓           | ✓    | Available via FIX protocol.                 |
+
+### Configuration Options
+
+The following execution client configuration options are available:
+
+| Option                       | Default | Description                                          |
+|------------------------------|---------|------------------------------------------------------|
+| `portfolio_id`               | `None`  | Specifies the Coinbase International portfolio to trade. Required for execution. |
+| `http_timeout_secs`          | `60`    | Default timeout for HTTP requests in seconds. |
+
+### FIX Drop Copy Integration
 
 The Coinbase International adapter includes a FIX (Financial Information eXchange) [drop copy](https://docs.cdp.coinbase.com/intx/docs/fix-msg-drop-copy) client.
 This provides reliable, low-latency execution updates directly from Coinbase's matching engine.
@@ -185,7 +210,7 @@ No additional configuration is required beyond providing valid API credentials.
 The REST client handles processing `REJECTED` and `ACCEPTED` status execution messages on order submission.
 :::
 
-### Account and position management
+### Account and Position Management
 
 On startup, the execution client requests and loads your current account and execution state including:
 
@@ -252,7 +277,7 @@ node.add_exec_client_factory(COINBASE_INTX, CoinbaseIntxLiveExecClientFactory)
 node.build()
 ```
 
-### API credentials
+### API Credentials
 
 Provide credentials to the clients using one of the following methods.
 

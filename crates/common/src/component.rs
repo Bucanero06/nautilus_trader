@@ -13,25 +13,27 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-use std::fmt::Debug;
+use std::{cell::RefCell, rc::Rc};
 
-use nautilus_model::identifiers::ComponentId;
+use nautilus_model::identifiers::{ComponentId, TraderId};
 
 use crate::{
+    actor::Actor,
+    cache::Cache,
+    clock::Clock,
     enums::{ComponentState, ComponentTrigger},
     timer::TimeEvent,
 };
 
 /// Common trait for components.
-pub trait Component: Debug {
+///
+/// Components are actors with lifecycle management capabilities.
+pub trait Component: Actor {
     /// Returns the unique identifier for this component.
-    fn id(&self) -> ComponentId;
+    fn component_id(&self) -> ComponentId;
 
     /// Returns the current state of the component.
     fn state(&self) -> ComponentState;
-
-    /// Returns the component trigger.
-    fn trigger(&self) -> ComponentTrigger;
 
     /// Returns whether the component is currently running.
     fn is_running(&self) -> bool;
@@ -41,6 +43,18 @@ pub trait Component: Debug {
 
     /// Returns whether the component has been disposed.
     fn is_disposed(&self) -> bool;
+
+    /// Registers the component with a system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the component fails to register.
+    fn register(
+        &mut self,
+        trader_id: TraderId,
+        clock: Rc<RefCell<dyn Clock>>,
+        cache: Rc<RefCell<Cache>>,
+    ) -> anyhow::Result<()>;
 
     /// Starts the component.
     ///
@@ -70,7 +84,7 @@ pub trait Component: Debug {
     /// Returns an error if the component fails to dispose.
     fn dispose(&mut self) -> anyhow::Result<()>;
 
-    /// Handles a timer event (TBD).
+    /// Handles a time event (TBD).
     fn handle_event(&mut self, event: TimeEvent);
 }
 

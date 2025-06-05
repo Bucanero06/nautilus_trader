@@ -82,7 +82,7 @@ or multiple wallets could be configured with multiple `PolymarketExecutionClient
 Ensure your wallet is funded with **USDC.e**, otherwise you will encounter the "not enough balance / allowance" API error when submitting orders.
 :::
 
-### Setting allowances for Polymarket contracts
+### Setting Allowances for Polymarket Contracts
 
 Before you can start trading, you need to ensure that your wallet has allowances set for Polymarket's smart contracts.
 You can do this by running the provided script located at `/adapters/polymarket/scripts/set_allowances.py`.
@@ -129,7 +129,7 @@ Run the script using:
 python nautilus_trader/adapters/polymarket/scripts/set_allowances.py
 ```
 
-### Script breakdown
+### Script Breakdown
 
 The script performs the following actions:
 
@@ -183,18 +183,56 @@ When setting up NautilusTrader to work with Polymarket, it’s crucial to proper
 We recommend using environment variables to manage your credentials.
 :::
 
-## Orders
+## Capability Matrix
 
-The following order types are supported on Polymarket:
+Polymarket operates as a prediction market with limited order complexity compared to traditional exchanges.
 
-- `MARKET` (executed as a marketable limit order)
-- `LIMIT`
+### Order Types
 
-The following time in force options are available:
+| Order Type             | Binary Options | Notes                               |
+|------------------------|----------------|-------------------------------------|
+| `MARKET`               | ✓              | Executed as marketable limit order. |
+| `LIMIT`                | ✓              |                                     |
+| `STOP_MARKET`          | -              | *Not supported*.                    |
+| `STOP_LIMIT`           | -              | *Not supported*.                    |
+| `MARKET_IF_TOUCHED`    | -              | *Not supported*.                    |
+| `LIMIT_IF_TOUCHED`     | -              | *Not supported*.                    |
+| `TRAILING_STOP_MARKET` | -              | *Not supported*.                    |
 
-- `GTC`: Good Till Cancel
-- `GTD`: Good Till Date (second granularity based on UNIX time)
-- `FOK`: Fill or Kill
+### Execution Instructions
+
+| Instruction   | Binary Options | Notes                                     |
+|---------------|----------------|-------------------------------------------|
+| `post_only`   | -              | *Not supported*.                          |
+| `reduce_only` | -              | *Not supported*.                          |
+
+### Time-in-Force Options
+
+| Time-in-Force | Binary Options | Notes                                     |
+|---------------|----------------|-------------------------------------------|
+| `GTC`         | ✓              | Good Till Canceled.                       |
+| `GTD`         | ✓              | Good Till Date.                           |
+| `FOK`         | ✓              | Fill or Kill.                             |
+| `IOC`         | ✓              | Immediate or Cancel (maps to FAK).        |
+
+### Advanced Order Features
+
+| Feature            | Binary Options | Notes                                |
+|--------------------|----------------|--------------------------------------|
+| Order Modification | -              | Cancellation functionality only.     |
+| Bracket/OCO Orders | -              | *Not supported*.                     |
+| Iceberg Orders     | -              | *Not supported*.                     |
+
+### Configuration Options
+
+The following execution client configuration options are available:
+
+| Option                               | Default | Description                      |
+|--------------------------------------|---------|----------------------------------|
+| `signature_type`                     | `0`     | Polymarket signature type (EOA). |
+| `funder`                             | `None`  | Wallet address for funding USDC transactions. |
+| `generate_order_history_from_trades` | `False` | Experimental feature to generate order reports from trade history (*not recommended*). |
+| `log_raw_ws_messages`                | `False` | If `True`, logs raw WebSocket messages (performance penalty from pretty JSON formatting). |
 
 ## Trades
 

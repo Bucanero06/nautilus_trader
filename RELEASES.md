@@ -1,6 +1,35 @@
-# NautilusTrader 1.218.0 Beta
+# NautilusTrader 1.219.0 Beta
 
 Released on TBD (UTC).
+
+### Enhancements
+- Added `time_bars_build_delay` config option for `DataEngineConfig` (#2676), thanks @faysou
+- Added support for DEX swaps for blockchain adapter (#2683), thanks @filipmacek
+
+### Breaking Changes
+- Removed support for Databento DBN v1 schemas (migrate to DBN v2 or v3, see [DBN Changelog](https://github.com/databento/dbn/blob/main/CHANGELOG.md#0350---2025-05-28))
+- Changed Databento DBN upgrade policy to default v3
+
+### Internal Improvements
+- Upgraded `databento` crate to v0.26.2
+- Upgraded `pyo3` and `pyo3-async-runtimes` crates to v0.25.0
+
+### Fixes
+- Fixed `generate_order_modify_rejected` typo in Binance execution client (#2682), thanks for reporting @etiennepar
+- Fixed order status report generation for Polymarket where `venue_order_id` was unbounded
+- Fixed Arrow schema registration for `BinanceBar`
+
+### Documentation Updates
+None
+
+### Deprecations
+None
+
+---
+
+# NautilusTrader 1.218.0 Beta
+
+Released on 31st May 2025 (UTC).
 
 ### Enhancements
 - Added convenient re-exports for Betfair adapter (constants, configs, factories, types)
@@ -33,7 +62,6 @@ Released on TBD (UTC).
 ### Internal Improvements
 - Added `activation_price` str and repr tests for trailing stop orders (#2620), thanks @hope2see
 - Added condition check for order `contingency_type` and `linked_order_ids` where a contingency should have associated linked order IDs
-- Added validations for position timestamping for `ts_opened` and `ts_closed`
 - Improved robustness of socket client reconnects and disconnects to avoid state race conditions
 - Improved error handling for socket clients, will now raise Python exceptions on send errors rather than logging with `tracing` only
 - Improved error handling for Databento adapter by changing many unwraps to instead log or raise Python exceptions (where applicable)
@@ -78,17 +106,17 @@ Released on TBD (UTC).
 - Changed to faster message bus pattern matching logic from Rust (#2643), thanks @twitu
 - Upgraded Rust (MSRV) to 1.87.0
 - Upgraded Cython to v3.1.0 (now stable)
-- Upgraded `databento` crate to v0.25.0
+- Upgraded `databento` crate to v0.26.0
 - Upgraded `redis` crate to v0.31.0
 - Upgraded `sqlx` crate to v0.8.6
 - Upgraded `tokio` crate to v1.45.1
-
 
 ### Fixes
 - Fixed portfolio account updates leading to incorrect balances (#2632, #2637), thanks for reporting @bartolootrit and @DeirhX
 - Fixed portfolio handling of `OrderExpired` events not updating state (margin requirements may change)
 - Fixed event handling for `ExecutionEngine` so it fully updates the `Portfolio` before to publishing execution events (#2513), thanks for reporting @stastnypremysl
 - Fixed PnL calculation for margin account on position flip (#2657), thanks for reporting @Egisess
+- Fixed notional value pre-trade risk check when order using quote quantity (#2628), thanks for reporting @DeevsDeevs
 - Fixed position snapshot cache access for `ExecutionEngine`
 - Fixed position snapshot `SystemError` calling `copy.deepcopy()` by simply using a `pickle` round trip to copy the position instance
 - Fixed event purging edge cases for account and position where at least one event must be guaranteed
@@ -98,6 +126,7 @@ Released on TBD (UTC).
 - Fixed message bus subscription matching logic in Rust (#2646), thanks @twitu
 - Fixed trailing stop market fill behavior when top-level exhausted to align with market orders (#2540), thanks for reporting @stastnypremysl
 - Fixed stop limit fill behavior on initial trigger where the limit order was continuing to fill as a taker beyond available liquidity, thanks for reporting @hope2see
+- Fixed matching engine trade processing when aggressor side is `NO_AGGRESSOR` (we can still update the matching core)
 - Fixed modifying and updating trailing stop orders (#2619), thanks @hope2see
 - Fixed processing activated trailing stop update when no trigger price, thanks for reporting @hope2see
 - Fixed terminating backtest on `AccountError` when streaming, the exception needed to be reraised to interrupt the streaming of chunks (#2546), thanks for reporting @stastnypremysl
@@ -106,9 +135,11 @@ Released on TBD (UTC).
 - Fixed quote tick parsing for one-sided books on Polymarket
 - Fixed order fill handling for limit orders with `MAKER` liquidity side on Polymarket
 - Fixed currency parsing for `BinaryOption` on Polymarket to consistently use USDC.e (PoS USDC on Polygon)
+- Fixed identity error handling during keep-alive for Betfair, will now reconnect
 - Updated `BinanceFuturesEventType` enum with additional variants, thanks for reporting @miller-moore
 
 ### Documentation Updates
+- Added capability matrices for integration guides
 - Added content to Architecture concept guide
 - Added content to Live Trading concept guide
 - Added content to Developer Guide
@@ -118,7 +149,7 @@ Released on TBD (UTC).
 - Fixed several errors in concept guides
 
 ### Deprecations
-None
+- Deprecated support for Databento [instrument definitions](https://databento.com/docs/schemas-and-data-formats/instrument-definitions) v1 data, v2 & v3 continue to be supported and v1 data can be migrated (see Databento documentation)
 
 ---
 
