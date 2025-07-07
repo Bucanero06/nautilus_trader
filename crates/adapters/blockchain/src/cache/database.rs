@@ -13,13 +13,9 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
+use alloy::primitives::U256;
 use nautilus_model::defi::{
-    amm::Pool,
-    block::Block,
-    chain::{Chain, SharedChain},
-    dex::Dex,
-    swap::Swap,
-    token::Token,
+    Block, Chain, Dex, Pool, PoolLiquidityUpdate, PoolSwap, SharedChain, Token,
 };
 use sqlx::{PgPool, postgres::PgConnectOptions};
 
@@ -34,6 +30,10 @@ pub struct BlockchainCacheDatabase {
 
 impl BlockchainCacheDatabase {
     /// Initializes a new database instance by establishing a connection to PostgreSQL.
+    ///
+    /// # Panics
+    ///
+    /// Panics if unable to connect to PostgreSQL with the provided options.
     pub async fn init(pg_options: PgConnectOptions) -> Self {
         let pool = PgPool::connect_with(pg_options)
             .await
@@ -42,6 +42,10 @@ impl BlockchainCacheDatabase {
     }
 
     /// Seeds the database with a blockchain chain record.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database operation fails.
     pub async fn seed_chain(&self, chain: &Chain) -> anyhow::Result<()> {
         sqlx::query(
             r"
@@ -61,12 +65,20 @@ impl BlockchainCacheDatabase {
     }
 
     /// Inserts or updates a block record in the database.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database operation fails.
     pub async fn add_block(&self, chain_id: u32, block: &Block) -> anyhow::Result<()> {
         sqlx::query(
             r"
             INSERT INTO block (
-                chain_id, number, hash, parent_hash, miner, gas_limit, gas_used, timestamp
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                chain_id, number, hash, parent_hash, miner, gas_limit, gas_used, timestamp,
+                base_fee_per_gas, blob_gas_used, excess_blob_gas,
+                l1_gas_price, l1_gas_used, l1_fee_scalar
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+            )
             ON CONFLICT (chain_id, number)
             DO UPDATE
             SET
@@ -75,7 +87,13 @@ impl BlockchainCacheDatabase {
                 miner = $5,
                 gas_limit = $6,
                 gas_used = $7,
-                timestamp = $8
+                timestamp = $8,
+                base_fee_per_gas = $9,
+                blob_gas_used = $10,
+                excess_blob_gas = $11,
+                l1_gas_price = $12,
+                l1_gas_used = $13,
+                l1_fee_scalar = $14
         ",
         )
         .bind(chain_id as i32)
@@ -86,6 +104,12 @@ impl BlockchainCacheDatabase {
         .bind(block.gas_limit as i64)
         .bind(block.gas_used as i64)
         .bind(block.timestamp.to_string())
+        .bind(block.base_fee_per_gas.as_ref().map(U256::to_string))
+        .bind(block.blob_gas_used.as_ref().map(U256::to_string))
+        .bind(block.excess_blob_gas.as_ref().map(U256::to_string))
+        .bind(block.l1_gas_price.as_ref().map(U256::to_string))
+        .bind(block.l1_gas_used.map(|v| v as i64))
+        .bind(block.l1_fee_scalar.map(|v| v as i64))
         .execute(&self.pool)
         .await
         .map(|_| ())
@@ -93,6 +117,10 @@ impl BlockchainCacheDatabase {
     }
 
     /// Retrieves block timestamps for a given chain starting from a specific block number.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
     pub async fn load_block_timestamps(
         &self,
         chain: SharedChain,
@@ -116,6 +144,10 @@ impl BlockchainCacheDatabase {
     }
 
     /// Adds or updates a DEX (Decentralized Exchange) record in the database.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database operation fails.
     pub async fn add_dex(&self, dex: &Dex) -> anyhow::Result<()> {
         sqlx::query(
             r"
@@ -138,6 +170,10 @@ impl BlockchainCacheDatabase {
     }
 
     /// Adds or updates a liquidity pool/pair record in the database.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database operation fails.
     pub async fn add_pool(&self, pool: &Pool) -> anyhow::Result<()> {
         sqlx::query(
             r"
@@ -177,6 +213,10 @@ impl BlockchainCacheDatabase {
     }
 
     /// Adds or updates a token record in the database.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database operation fails.
     pub async fn add_token(&self, token: &Token) -> anyhow::Result<()> {
         sqlx::query(
             r"
@@ -202,29 +242,83 @@ impl BlockchainCacheDatabase {
         .map_err(|e| anyhow::anyhow!("Failed to insert into token table: {e}"))
     }
 
-    /// Records a swap transaction in the database.
-    pub async fn add_swap(&self, chain_id: u32, swap: &Swap) -> anyhow::Result<()> {
+    /// Persists a token swap transaction event to the `pool_swap` table.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database operation fails.
+    pub async fn add_swap(&self, chain_id: u32, swap: &PoolSwap) -> anyhow::Result<()> {
         sqlx::query(
             r"
-            INSERT INTO swap (
-                chain_id, pool_address, block, sender, side, quantity, price
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO pool_swap (
+                chain_id, pool_address, block, transaction_hash, transaction_index,
+                log_index, sender, side, size, price
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (chain_id, transaction_hash, log_index)
+            DO NOTHING
         ",
         )
         .bind(chain_id as i32)
-        .bind(swap.pool.address.to_string())
+        .bind(swap.pool_address.to_string())
         .bind(swap.block as i64)
+        .bind(swap.transaction_hash.as_str())
+        .bind(swap.transaction_index as i32)
+        .bind(swap.log_index as i32)
         .bind(swap.sender.to_string())
         .bind(swap.side.to_string())
-        .bind(swap.quantity.to_string())
+        .bind(swap.size.to_string())
         .bind(swap.price.to_string())
         .execute(&self.pool)
         .await
         .map(|_| ())
-        .map_err(|e| anyhow::anyhow!("Failed to insert into swap table: {e}"))
+        .map_err(|e| anyhow::anyhow!("Failed to insert into pool_swap table: {e}"))
+    }
+
+    /// Persists a liquidity position change (mint/burn) event to the `pool_liquidity` table.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database operation fails.
+    pub async fn add_pool_liquidity_update(
+        &self,
+        chain_id: u32,
+        liquidity_update: &PoolLiquidityUpdate,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            r"
+            INSERT INTO pool_liquidity (
+                chain_id, pool_address, block, transaction_hash, transaction_index, log_index,
+                event_type, sender, owner, position_liquidity, amount0, amount1, tick_lower, tick_upper
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ON CONFLICT (chain_id, transaction_hash, log_index)
+            DO NOTHING
+        ",
+        )
+        .bind(chain_id as i32)
+        .bind(liquidity_update.pool_address.to_string())
+        .bind(liquidity_update.block as i64)
+        .bind(liquidity_update.transaction_hash.as_str())
+        .bind(liquidity_update.transaction_index as i32)
+        .bind(liquidity_update.log_index as i32)
+        .bind(liquidity_update.kind.to_string())
+        .bind(liquidity_update.sender.map(|sender| sender.to_string()))
+        .bind(liquidity_update.owner.to_string())
+        .bind(liquidity_update.position_liquidity.to_string())
+        .bind(liquidity_update.amount0.to_string())
+        .bind(liquidity_update.amount1.to_string())
+        .bind(liquidity_update.tick_lower)
+        .bind(liquidity_update.tick_upper)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("Failed to insert into pool_liquidity table: {e}"))
     }
 
     /// Retrieves all token records for the given chain and converts them into `Token` domain objects.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
     pub async fn load_tokens(&self, chain: SharedChain) -> anyhow::Result<Vec<Token>> {
         sqlx::query_as::<_, TokenRow>("SELECT * FROM token WHERE chain_id = $1")
             .bind(chain.chain_id as i32)

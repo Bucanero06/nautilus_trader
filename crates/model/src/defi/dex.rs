@@ -15,18 +15,40 @@
 
 use std::{borrow::Cow, fmt::Display, sync::Arc};
 
-use crate::defi::{amm::Pool, chain::Chain};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    defi::{amm::Pool, chain::Chain},
+    identifiers::{InstrumentId, Symbol, Venue},
+    instruments::{Instrument, any::InstrumentAny, currency_pair::CurrencyPair},
+    types::{currency::Currency, fixed::FIXED_PRECISION, price::Price, quantity::Quantity},
+};
 
 /// Represents different types of Automated Market Makers (AMMs) in DeFi protocols.
-#[derive(Debug, Clone)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    strum::EnumString,
+    strum::Display,
+    strum::EnumIter,
+)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.model")
+)]
+#[non_exhaustive]
 pub enum AmmType {
     /// Constant Product Automated Market Maker.
     CPAMM,
     /// Concentrated Liquidity Automated Market Maker.
     CLAMM,
-    /// Enhanced CLAMM with Additional Features (Uniswap V4 with Hooks).
+    /// Concentrated liquidity AMM **with hooks** (e.g. upcoming Uniswap v4).
     CLAMEnhanced,
-    /// Specialized AMM for Stable Assets (Curve Style).
+    /// Specialized Constant-Sum AMM for low-volatility assets (Curve-style “StableSwap”).
     StableSwap,
     /// AMM with customizable token weights (e.g., Balancer style).
     WeightedPool,
@@ -35,7 +57,11 @@ pub enum AmmType {
 }
 
 /// Represents a decentralized exchange (DEX) in a blockchain ecosystem.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.model")
+)]
 pub struct Dex {
     /// The blockchain network where this DEX operates.
     pub chain: Chain,
@@ -47,6 +73,10 @@ pub struct Dex {
     pub pool_created_event: Cow<'static, str>,
     /// The event signature or identifier used to detect swap events.
     pub swap_created_event: Cow<'static, str>,
+    /// The event signature or identifier used to detect mint events.
+    pub mint_created_event: Cow<'static, str>,
+    /// The event signature or identifier used to detect burn events.
+    pub burn_created_event: Cow<'static, str>,
     /// The type of automated market maker (AMM) algorithm used by this DEX.
     pub amm_type: AmmType,
     /// Collection of liquidity pools managed by this DEX.
@@ -60,6 +90,7 @@ pub type SharedDex = Arc<Dex>;
 impl Dex {
     /// Creates a new [`Dex`] instance with the specified properties.
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain: Chain,
         name: impl Into<Cow<'static, str>>,
@@ -67,6 +98,8 @@ impl Dex {
         amm_type: AmmType,
         pool_created_event: impl Into<Cow<'static, str>>,
         swap_created_event: impl Into<Cow<'static, str>>,
+        mint_created_event: impl Into<Cow<'static, str>>,
+        burn_created_event: impl Into<Cow<'static, str>>,
     ) -> Self {
         Self {
             chain,
@@ -74,19 +107,19 @@ impl Dex {
             factory: factory.into(),
             pool_created_event: pool_created_event.into(),
             swap_created_event: swap_created_event.into(),
+            mint_created_event: mint_created_event.into(),
+            burn_created_event: burn_created_event.into(),
             amm_type,
             pairs: vec![],
         }
     }
 
-    /// Returns a unique identifier for this DEX, combining chain and name.
-    ///
-    /// Format: "{chain_id}:{name_snake_case}"
+    /// Returns a unique identifier for this DEX, combining chain and protocol name.
     pub fn id(&self) -> String {
         format!(
             "{}:{}",
             self.chain.name,
-            self.name.to_lowercase().replace(" ", "_")
+            self.name.to_lowercase().replace(' ', "_")
         )
     }
 }
@@ -94,5 +127,48 @@ impl Dex {
 impl Display for Dex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Dex(chain={}, name={})", self.chain, self.name)
+    }
+}
+
+impl From<Pool> for CurrencyPair {
+    fn from(p: Pool) -> Self {
+        let symbol = Symbol::from(format!("{}/{}", p.token0.symbol, p.token1.symbol));
+        let id = InstrumentId::new(symbol, Venue::from(p.dex.id()));
+
+        let size_precision = p.token0.decimals.min(FIXED_PRECISION);
+        let price_precision = p.token1.decimals.min(FIXED_PRECISION);
+
+        let price_increment = Price::new(10f64.powi(-(price_precision as i32)), price_precision);
+        let size_increment = Quantity::new(10f64.powi(-(size_precision as i32)), size_precision);
+
+        CurrencyPair::new(
+            id,
+            symbol,
+            Currency::from(p.token0.symbol.as_str()),
+            Currency::from(p.token1.symbol.as_str()),
+            price_precision,
+            size_precision,
+            price_increment,
+            size_increment,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.into(),
+            0.into(),
+        )
+    }
+}
+
+impl From<Pool> for InstrumentAny {
+    fn from(p: Pool) -> Self {
+        CurrencyPair::from(p).into_any()
     }
 }

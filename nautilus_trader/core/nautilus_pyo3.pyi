@@ -13,7 +13,7 @@
 #  limitations under the License.
 # -------------------------------------------------------------------------------------------------
 
-# ruff: noqa: UP007 PYI021 PYI044 PYI053
+# ruff: noqa: UP007, PYI021
 # fmt: off
 
 import datetime as dt
@@ -184,18 +184,17 @@ class CustomData:
 class DataActor:
     def __init__(self, config: object = None) -> None: ...
     @property
-    def actor_id(self) -> str: ...
+    def actor_id(self) -> ActorId: ...
     @property
-    def state(self) -> Any: ...  # TODO: Add ComponentState enum
-    @property
-    def trader_id(self) -> str | None: ...
+    def trader_id(self) -> TraderId | None: ...
 
+    def state(self) -> ComponentState: ...
     def is_ready(self) -> bool: ...
     def is_running(self) -> bool: ...
     def is_stopped(self) -> bool: ...
     def is_disposed(self) -> bool: ...
     def is_degraded(self) -> bool: ...
-    def is_faulting(self) -> bool: ...
+    def is_faulted(self) -> bool: ...
 
     def initialize(self) -> None: ...
     def start(self) -> None: ...
@@ -209,6 +208,19 @@ class DataActor:
     def register_warning_event(self, event_type: str) -> None: ...
     def deregister_warning_event(self, event_type: str) -> None: ...
     def shutdown_system(self, reason: str | None = None) -> None: ...
+
+    def on_signal(self, signal: Signal) -> None: ...
+    def on_data(self, data: Any) -> None: ...
+    def on_instrument(self, instrument: Any) -> None: ...
+    def on_quote_tick(self, tick: QuoteTick) -> None: ...
+    def on_trade_tick(self, tick: TradeTick) -> None: ...
+    def on_bar(self, bar: Bar) -> None: ...
+    def on_book_deltas(self, deltas: OrderBookDeltas) -> None: ...
+    def on_book(self, order_book: OrderBook) -> None: ...
+    def on_mark_price(self, mark_price: MarkPriceUpdate) -> None: ...
+    def on_index_price(self, index_price: IndexPriceUpdate) -> None: ...
+    def on_instrument_status(self, data: InstrumentStatus) -> None: ...
+    def on_instrument_close(self, update: InstrumentClose) -> None: ...
 
     def subscribe_data(
         self,
@@ -454,12 +466,6 @@ class DataActor:
     ) -> str:
         ...
 
-    def on_data(self, data: Any) -> None: ...
-    def on_quote_tick(self, tick: QuoteTick) -> None: ...
-    def on_trade_tick(self, tick: TradeTick) -> None: ...
-    def on_bar(self, bar: Bar) -> None: ...
-    def on_start(self) -> None: ...
-    def on_stop(self) -> None: ...
 
 ###################################################################################################
 # Cryptography
@@ -1255,6 +1261,22 @@ class ContingencyType(Enum):
     OTO = "OTO"
     OUO = "OUO"
 
+class ComponentState(Enum):
+    PRE_INITIALIZED = "PRE_INITIALIZED"
+    READY = "READY"
+    STARTING = "STARTING"
+    RUNNING = "RUNNING"
+    STOPPING = "STOPPING"
+    STOPPED = "STOPPED"
+    RESUMING = "RESUMING"
+    RESETTING = "RESETTING"
+    DISPOSING = "DISPOSING"
+    DISPOSED = "DISPOSED"
+    DEGRADING = "DEGRADING"
+    DEGRADED = "DEGRADED"
+    FAULTING = "FAULTING"
+    FAULTED = "FAULTED"
+
 class CurrencyType(Enum):
     CRYPTO = "CRYPTO"
     FIAT = "FIAT"
@@ -1344,12 +1366,6 @@ class OrderType(Enum):
     TRAILING_STOP_MARKET = "TRAILING_STOP_MARKET"
     TRAILING_STOP_LIMIT = "TRAILING_STOP_LIMIT"
 
-class ParquetWriteMode(Enum):
-    APPEND = "APPEND"
-    PREPEND = "PREPEND"
-    OVERWRITE = "OVERWRITE"
-    NEWFILE = "NEWFILE"
-
 class PositionSide(Enum):
     FLAT = "FLAT"
     LONG = "LONG"
@@ -1435,6 +1451,13 @@ class AccountId:
     def __init__(self, value: str) -> None: ...
     @classmethod
     def from_str(cls, value: str) -> AccountId: ...
+    @property
+    def value(self) -> str: ...
+
+class ActorId:
+    def __init__(self, value: str) -> None: ...
+    @classmethod
+    def from_str(cls, value: str) -> ActorId: ...
     @property
     def value(self) -> str: ...
 
@@ -3898,45 +3921,191 @@ class PostgresCacheDatabase:
 
 
 class ParquetDataCatalogV2:
-    def __init__(self, base_path: str, batch_size: int | None = None) -> None: ...
+    def __init__(
+        self,
+        base_path: str,
+        storage_options: dict[str, str] | None = None,
+        batch_size: int | None = None,
+        compression: int | None = None,
+        max_row_group_size: int | None = None,
+    ) -> None: ...
     def write_quote_ticks(
         self,
         data: list[QuoteTick],
-        write_mode: ParquetWriteMode | None = None
+        start: int | None = None,
+        end: int | None = None,
+        skip_disjoint_check: bool = False,
     ) -> str: ...
     def write_trade_ticks(
         self,
         data: list[TradeTick],
-        write_mode: ParquetWriteMode | None = None
+        start: int | None = None,
+        end: int | None = None,
+        skip_disjoint_check: bool = False,
     ) -> str: ...
     def write_order_book_deltas(
         self,
         data: list[OrderBookDelta],
-        write_mode: ParquetWriteMode | None = None
+        start: int | None = None,
+        end: int | None = None,
+        skip_disjoint_check: bool = False,
     ) -> str: ...
     def write_bars(
         self,
         data: list[Bar],
-        write_mode: ParquetWriteMode | None = None
+        start: int | None = None,
+        end: int | None = None,
+        skip_disjoint_check: bool = False,
     ) -> str: ...
     def write_order_book_depths(
         self,
         data: list[OrderBookDepth10],
-        write_mode: ParquetWriteMode | None = None
+        start: int | None = None,
+        end: int | None = None,
+        skip_disjoint_check: bool = False,
     ) -> str: ...
-    def consolidate_catalog(self) -> None: ...
-    def consolidate_data(self, type_name: str, instrument_id: str | None = None) -> None: ...
-    def query_timestamp_bound(
+    def write_mark_price_updates(
+        self,
+        data: list[MarkPriceUpdate],
+        start: int | None = None,
+        end: int | None = None,
+        skip_disjoint_check: bool = False,
+    ) -> str: ...
+    def write_index_price_updates(
+        self,
+        data: list[IndexPriceUpdate],
+        start: int | None = None,
+        end: int | None = None,
+        skip_disjoint_check: bool = False,
+    ) -> str: ...
+    def consolidate_catalog(
+        self,
+        start: int | None = None,
+        end: int | None = None,
+        ensure_contiguous_files: bool | None = None,
+    ) -> None: ...
+    def consolidate_data(
+        self,
+        type_name: str,
+        instrument_id: str | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        ensure_contiguous_files: bool | None = None,
+    ) -> None: ...
+    def consolidate_catalog_by_period(
+        self,
+        period_nanos: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        ensure_contiguous_files: bool | None = None,
+    ) -> None: ...
+    def consolidate_data_by_period(
+        self,
+        type_name: str,
+        identifier: str | None = None,
+        period_nanos: int | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        ensure_contiguous_files: bool | None = None,
+    ) -> None: ...
+    def query_last_timestamp(
         self,
         data_cls: str,
         instrument_id: str | None = None,
-        is_last: bool = True
     ) -> int | None: ...
-    def query_parquet_files(
+    def query_files(
+        self,
+        data_cls: str,
+        instrument_ids: list[str] | None = None,
+        start: int | None = None,
+        end: int | None = None,
+    ) -> list[str]: ...
+    def get_intervals(
+        self,
+        data_cls: str,
+        instrument_id: str | None = None,
+    ) -> list[tuple[int, int]]: ...
+    def get_missing_intervals_for_request(
+        self,
+        start: int,
+        end: int,
+        data_cls: str,
+        instrument_id: str | None = None,
+    ) -> list[tuple[int, int]]: ...
+    def reset_data_file_names(
+        self,
+        data_cls: str,
+        instrument_id: str | None = None,
+    ) -> None: ...
+    def reset_catalog_file_names(self) -> None: ...
+    def extend_file_name(
+        self,
+        data_cls: str,
+        instrument_id: str | None = None,
+        start: int | None = None,
+        end: int | None = None,
+    ) -> None: ...
+    def query_quote_ticks(
+        self,
+        instrument_ids: list[str] | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        where_clause: str | None = None,
+    ) -> list[QuoteTick]: ...
+    def query_trade_ticks(
+        self,
+        instrument_ids: list[str] | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        where_clause: str | None = None,
+    ) -> list[TradeTick]: ...
+    def query_order_book_deltas(
+        self,
+        instrument_ids: list[str] | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        where_clause: str | None = None,
+    ) -> list[OrderBookDelta]: ...
+    def query_bars(
+        self,
+        instrument_ids: list[str] | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        where_clause: str | None = None,
+    ) -> list[Bar]: ...
+    def query_order_book_depths(
+        self,
+        instrument_ids: list[str] | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        where_clause: str | None = None,
+    ) -> list[OrderBookDepth10]: ...
+    def query_mark_price_updates(
+        self,
+        instrument_ids: list[str] | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        where_clause: str | None = None,
+    ) -> list[MarkPriceUpdate]: ...
+    def query_index_price_updates(
+        self,
+        instrument_ids: list[str] | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        where_clause: str | None = None,
+    ) -> list[IndexPriceUpdate]: ...
+    def delete_data_range(
         self,
         type_name: str,
-        instrument_id: str | None = None
-    ) -> list[str]: ...
+        identifier: str | None = None,
+        start: int | None = None,
+        end: int | None = None,
+    ) -> None: ...
+    def delete_catalog_range(
+        self,
+        start: int | None = None,
+        end: int | None = None,
+    ) -> None: ...
 
 ###################################################################################################
 # Network
@@ -4084,6 +4253,7 @@ class DataBackendSession:
         file_path: str,
         sql_query: str | None = None,
     ) -> None: ...
+    def register_object_store_from_uri(self, uri: str, storage_options: dict[str, str] | None = None) -> None: ...
     def to_query_result(self) -> DataQueryResult: ...
 
 class QueryResult:

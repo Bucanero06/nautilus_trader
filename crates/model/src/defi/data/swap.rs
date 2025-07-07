@@ -17,75 +17,106 @@ use std::fmt::Display;
 
 use alloy_primitives::Address;
 use nautilus_core::UnixNanos;
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    defi::{amm::SharedPool, chain::SharedChain, dex::SharedDex},
+    data::HasTsInit,
+    defi::{SharedChain, SharedDex},
     enums::OrderSide,
+    identifiers::InstrumentId,
     types::{Price, Quantity},
 };
 
 /// Represents a token swap transaction on a decentralized exchange (DEX).
-#[derive(Debug, Clone)]
-pub struct Swap {
-    /// The blockchain network where the swap occurred
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.model")
+)]
+pub struct PoolSwap {
+    /// The blockchain network where the swap occurred.
     pub chain: SharedChain,
-    /// The decentralized exchange where the swap was executed
+    /// The decentralized exchange where the swap was executed.
     pub dex: SharedDex,
-    /// The DEX liquidity pool
-    pub pool: SharedPool,
+    /// The instrument ID.
+    pub instrument_id: InstrumentId,
+    /// The blockchain address of the pool smart contract.
+    pub pool_address: Address,
     /// The blockchain block number at which the swap was executed.
     pub block: u64,
+    /// The unique hash identifier of the blockchain transaction containing the swap.
+    pub transaction_hash: String,
+    /// The index position of the transaction within the block.
+    pub transaction_index: u32,
+    /// The index position of the swap event log within the transaction.
+    pub log_index: u32,
     /// The blockchain address of the user or contract that initiated the swap.
     pub sender: Address,
     /// The direction of the swap from the perspective of the base token.
     pub side: OrderSide,
-    /// The amount of tokens being swapped
-    pub quantity: Quantity,
+    /// The amount of tokens swapped.
+    pub size: Quantity,
     /// The exchange rate at which the swap occurred.
     pub price: Price,
-    /// The timestamp of the swap in Unix nanoseconds.
+    /// UNIX timestamp (nanoseconds) when the swap occurred.
     pub timestamp: UnixNanos,
+    /// UNIX timestamp (nanoseconds) when the instance was initialized.
+    pub ts_init: UnixNanos,
 }
 
-impl Swap {
-    /// Creates a new [`Swap`] instance with the specified properties.
+impl PoolSwap {
+    /// Creates a new [`PoolSwap`] instance with the specified properties.
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain: SharedChain,
         dex: SharedDex,
-        pool: SharedPool,
+        instrument_id: InstrumentId,
+        pool_address: Address,
         block: u64,
+        transaction_hash: String,
+        transaction_index: u32,
+        log_index: u32,
         timestamp: UnixNanos,
         sender: Address,
         side: OrderSide,
-        quantity: Quantity,
+        size: Quantity,
         price: Price,
     ) -> Self {
         Self {
             chain,
             dex,
-            pool,
+            instrument_id,
+            pool_address,
             block,
+            transaction_hash,
+            transaction_index,
+            log_index,
             timestamp,
             sender,
             side,
-            quantity,
+            size,
             price,
+            ts_init: timestamp, // TODO: Use swap timestamp as init timestamp for now
         }
     }
 }
 
-impl Display for Swap {
+impl HasTsInit for PoolSwap {
+    fn ts_init(&self) -> UnixNanos {
+        self.ts_init
+    }
+}
+
+impl Display for PoolSwap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Swap(chain={}, dex={}, pool={}, side={}, quantity={}, price={})",
-            self.chain.name,
-            self.dex.name,
-            self.pool.ticker(),
+            "{}(instrument_id={}, side={}, quantity={}, price={})",
+            stringify!(PoolSwap),
+            self.instrument_id,
             self.side,
-            self.quantity,
+            self.size,
             self.price,
         )
     }

@@ -44,10 +44,7 @@ use nautilus_model::{
     identifiers::{ClientId, Symbol, Venue},
     instruments::Instrument,
 };
-use tokio::{
-    sync::mpsc::{self, UnboundedSender},
-    task::JoinHandle,
-};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -108,7 +105,7 @@ pub struct DatabentoDataClient {
     /// Data loader for venue-to-dataset mapping.
     loader: DatabentoDataLoader,
     /// Feed handler command senders per dataset.
-    cmd_channels: Arc<Mutex<AHashMap<String, mpsc::UnboundedSender<LiveCommand>>>>,
+    cmd_channels: Arc<Mutex<AHashMap<String, tokio::sync::mpsc::UnboundedSender<LiveCommand>>>>,
     /// Task handles for lifecycle management.
     task_handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
     /// Cancellation token for graceful shutdown.
@@ -117,8 +114,8 @@ pub struct DatabentoDataClient {
     publisher_venue_map: Arc<IndexMap<PublisherId, Venue>>,
     /// Symbol to venue mapping (for caching).
     symbol_venue_map: Arc<RwLock<AHashMap<Symbol, Venue>>>,
-    /// Data event sender for forwarding data to AsyncRunner.
-    data_sender: UnboundedSender<DataEvent>,
+    /// Data event sender for forwarding data to the async runner.
+    data_sender: tokio::sync::mpsc::UnboundedSender<DataEvent>,
 }
 
 impl DatabentoDataClient {
@@ -152,7 +149,6 @@ impl DatabentoDataClient {
             .map(|p| (p.publisher_id, Venue::from(p.venue.as_str())))
             .collect::<IndexMap<u16, Venue>>();
 
-        // Get the data event sender for forwarding data to AsyncRunner
         let data_sender = get_data_event_sender();
 
         Ok(Self {
@@ -189,7 +185,7 @@ impl DatabentoDataClient {
         if !channels.contains_key(dataset) {
             tracing::info!("Creating new feed handler for dataset: {dataset}");
             let cmd_tx = self.initialize_live_feed(dataset.to_string())?;
-            channels.insert(dataset.to_string(), cmd_tx.clone());
+            channels.insert(dataset.to_string(), cmd_tx);
 
             tracing::debug!("Feed handler created for dataset: {dataset}, channel stored");
         }
@@ -221,9 +217,9 @@ impl DatabentoDataClient {
     fn initialize_live_feed(
         &self,
         dataset: String,
-    ) -> anyhow::Result<mpsc::UnboundedSender<LiveCommand>> {
-        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-        let (msg_tx, msg_rx) = mpsc::channel(1000);
+    ) -> anyhow::Result<tokio::sync::mpsc::UnboundedSender<LiveCommand>> {
+        let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (msg_tx, msg_rx) = tokio::sync::mpsc::channel(1000);
 
         let mut feed_handler = DatabentoFeedHandler::new(
             self.config.api_key.clone(),
@@ -246,7 +242,7 @@ impl DatabentoDataClient {
                         tracing::error!("Feed handler error: {e}");
                     }
                 }
-                _ = cancellation_token.cancelled() => {
+                () = cancellation_token.cancelled() => {
                     tracing::info!("Feed handler cancelled");
                 }
             }
@@ -298,7 +294,7 @@ impl DatabentoDataClient {
                             }
                         }
                     }
-                    _ = cancellation_token.cancelled() => {
+                    () = cancellation_token.cancelled() => {
                         tracing::info!("Message processing cancelled");
                         break;
                     }
@@ -326,12 +322,12 @@ impl DataClient for DatabentoDataClient {
         None
     }
 
-    fn start(&self) -> anyhow::Result<()> {
+    fn start(&mut self) -> anyhow::Result<()> {
         tracing::debug!("Starting Databento data client");
         Ok(())
     }
 
-    fn stop(&self) -> anyhow::Result<()> {
+    fn stop(&mut self) -> anyhow::Result<()> {
         tracing::debug!("Stopping Databento data client");
 
         // Signal cancellation to all running tasks
@@ -349,18 +345,18 @@ impl DataClient for DatabentoDataClient {
         Ok(())
     }
 
-    fn reset(&self) -> anyhow::Result<()> {
+    fn reset(&mut self) -> anyhow::Result<()> {
         tracing::debug!("Resetting Databento data client");
         self.is_connected.store(false, Ordering::Relaxed);
         Ok(())
     }
 
-    fn dispose(&self) -> anyhow::Result<()> {
+    fn dispose(&mut self) -> anyhow::Result<()> {
         tracing::debug!("Disposing Databento data client");
         self.stop()
     }
 
-    async fn connect(&self) -> anyhow::Result<()> {
+    async fn connect(&mut self) -> anyhow::Result<()> {
         tracing::debug!("Connecting Databento data client");
 
         // Connection will happen lazily when subscriptions are made
@@ -371,7 +367,7 @@ impl DataClient for DatabentoDataClient {
         Ok(())
     }
 
-    async fn disconnect(&self) -> anyhow::Result<()> {
+    async fn disconnect(&mut self) -> anyhow::Result<()> {
         tracing::debug!("Disconnecting Databento data client");
 
         // Signal cancellation to all running tasks
@@ -394,10 +390,10 @@ impl DataClient for DatabentoDataClient {
         };
 
         for handle in handles {
-            if let Err(e) = handle.await {
-                if !e.is_cancelled() {
-                    tracing::error!("Task join error: {e}");
-                }
+            if let Err(e) = handle.await
+                && !e.is_cancelled()
+            {
+                tracing::error!("Task join error: {e}");
             }
         }
 

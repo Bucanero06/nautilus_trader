@@ -13,6 +13,12 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
+//! Message throttling and rate limiting functionality.
+//!
+//! This module provides throttling capabilities to control the rate of message processing
+//! and prevent system overload. The throttler can buffer, drop, or delay messages based
+//! on configured rate limits and time intervals.
+
 use std::{
     any::Any,
     cell::{RefCell, UnsafeCell},
@@ -301,7 +307,7 @@ where
     T: Debug,
 {
     pub fn new(actor_id: Ustr) -> Self {
-        let endpoint = Ustr::from(&format!("{}_process", actor_id));
+        let endpoint = Ustr::from(&format!("{actor_id}_process"));
         Self {
             actor_id,
             endpoint,
@@ -313,7 +319,7 @@ where
     pub fn get_timer_callback(&self) -> TimeEventCallback {
         let endpoint = self.endpoint.into(); // TODO: Optimize this
         let process_callback = Rc::new(move |_event: TimeEvent| {
-            msgbus::send(endpoint, &());
+            msgbus::send_any(endpoint, &());
         });
         TimeEventCallback::Rust(process_callback)
     }
@@ -343,7 +349,7 @@ where
 
                 // Send message to throttler process endpoint to resume
                 let process_callback = Rc::new(move |_event: TimeEvent| {
-                    msgbus::send(endpoint, &());
+                    msgbus::send_any(endpoint, &());
                 });
                 throttler.set_timer(Some(TimeEventCallback::Rust(process_callback)));
                 return;
@@ -718,6 +724,10 @@ mod tests {
         assert_eq!(throttler.sent_count, 6);
     }
 
+    ////////////////////////////////////////////////////////////////////////////////
+    // Property-based testing
+    ////////////////////////////////////////////////////////////////////////////////
+
     use proptest::prelude::*;
 
     #[derive(Clone, Debug)]
@@ -823,7 +833,7 @@ mod tests {
         proptest!(move |(inputs in throttler_test_strategy())| {
             test_throttler_with_inputs(inputs, test_throttler.clone());
             // Reset throttler state between runs
-            let throttler = unsafe { &mut *(test_throttler.throttler.get() as *mut _ as *mut Throttler<u64, Box<dyn Fn(u64)>>) };
+            let throttler = unsafe { &mut *test_throttler.throttler.get() };
             throttler.reset();
             throttler.clock.borrow_mut().reset();
         });
